@@ -30,24 +30,36 @@
 
 ;; Build + apply + record one :add-obj change (mirrors files.builder/commit-shape).
 (defn- add-shape! [state shape]
-  (let [{:keys [page-id frame-id stack]} @state
+  (let [{:keys [page-id frame-id]} @state
         change {:type :add-obj :id (:id shape) :page-id page-id
-                :parent-id (peek stack) :frame-id frame-id :obj shape}]
+                :parent-id (:parent-id shape) :frame-id frame-id :obj shape}]
     (swap! state #(-> %
                       (update :data cfc/process-changes [change] false)
                       (update :changes conj change)))
     (str (:id shape))))
 
 (defn- mk-shape [state type {:keys [x y width height name parentId fills strokes]}]
-  (let [{:keys [stack frame-id]} @state]
+  (let [{:keys [stack frame-id]} @state
+        valid-fills   (when (seq fills)
+                        (into [] (keep (fn [f]
+                                         (when (:fillColor f)
+                                           {:fill-color    (:fillColor f)
+                                            :fill-opacity  (or (:fillOpacity f) 1)}))) fills))
+        valid-strokes (when (seq strokes)
+                        (mapv (fn [s]
+                                {:stroke-color     (:strokeColor s)
+                                 :stroke-opacity   (or (:strokeOpacity s) 1)
+                                 :stroke-width     (or (:strokeWidth s) 1)
+                                 :stroke-style     (keyword (or (:strokeStyle s) "solid"))
+                                 :stroke-alignment (keyword (or (:strokeAlignment s) "center"))})
+                              strokes))]
     (cts/setup-shape
      (cond-> {:id (uuid/next) :type type :name (or name (clojure.core/name type))
               :x x :y y :width width :height height
-              :parent-id (if parentId (uuid/uuid parentId) (peek stack))
+              :parent-id (if parentId (uuid/parse parentId) (peek stack))
               :frame-id frame-id}
-       (seq fills)   (assoc :fills (mapv (fn [f] {:fill-color (:fillColor f)
-                                                  :fill-opacity (or (:fillOpacity f) 1)}) fills))
-       (seq strokes) (assoc :strokes strokes)))))
+       (seq valid-fills)   (assoc :fills valid-fills)
+       (seq valid-strokes) (assoc :strokes valid-strokes)))))
 
 ;; --- the JS-facing session object ------------------------------------------
 (defn- make-session [state file-id features]
@@ -61,8 +73,9 @@
        :closeBoard
        (fn []
          (swap! state (fn [s]
-                        (let [stack (pop (:stack s))]
-                          (assoc s :stack stack :frame-id (or (peek stack) root-frame)))))
+                        (let [stack  (if (> (count (:stack s)) 1) (pop (:stack s)) (:stack s))
+                              fid    (or (peek stack) root-frame)]
+                          (assoc s :stack stack :frame-id fid))))
          js/undefined)
        :addRect  (fn [json] (add-shape! state (mk-shape state :rect (args json))))
        :objects  (fn [] (js/JSON.stringify (->plain-js (get-in (:data @state) [:pages-index (:page-id @state) :objects]))))
@@ -75,7 +88,7 @@
        :commitBody
        (fn [json]
          (let [{:keys [sessionId revn vern]} (args json)
-               params {:id file-id :session-id (uuid/uuid sessionId)
+               params {:id file-id :session-id (uuid/parse sessionId)
                        :revn revn :vern vern :features (set features) :changes (:changes @state)}]
            (t/encode-str params)))})
 

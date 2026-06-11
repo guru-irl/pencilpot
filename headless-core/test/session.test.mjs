@@ -27,3 +27,16 @@ test("session adds a board and a nested rect with real geometry; validates", () 
   assert.equal(changes.length, 2);
   assert.ok(changes.every((c) => c.type === "add-obj"));
 });
+
+test("addRect honors parentId pointing at a non-top-of-stack board", () => {
+  const s = createSession(JSON.stringify({ empty: true }));
+  const b1 = s.addBoard(JSON.stringify({ x: 0, y: 0, width: 200, height: 200, name: "B1" }));
+  s.closeBoard();
+  const b2 = s.addBoard(JSON.stringify({ x: 300, y: 0, width: 200, height: 200, name: "B2" }));
+  s.closeBoard();
+  // stack is now back to root; place a rect explicitly under B1
+  const r = s.addRect(JSON.stringify({ x: 10, y: 10, width: 50, height: 50, parentId: b1 }));
+  const objs = JSON.parse(s.objects());
+  assert.equal(objs[r]["parent-id"] ?? objs[r].parentId, b1, "rect parented under the requested board, not the stack top/root");
+  assert.deepEqual(JSON.parse(s.validate()), []);
+});
