@@ -1,27 +1,39 @@
 import { writeFileSync } from "node:fs";
-import { rpc, transitToken } from "./helpers.mjs";
+import { rpc, transitToken, BASE } from "./helpers.mjs";
 
 const email = "hl@penpot.local", password = "penpot1234", fullname = "Headless Tester";
 
 // 1. register (email verification disabled on this instance)
-const prep = await rpc("prepare-register-profile", { email, password, fullname });
-const regToken = transitToken(prep.json);
-await rpc("register-profile", { token: regToken, fullname }).catch(() => {});
+try {
+  const prep = await rpc("prepare-register-profile", { email, password, fullname });
+  const regToken = transitToken(prep.json);
+  if (!regToken) throw new Error("prepare-register-profile returned no token");
+  try {
+    await rpc("register-profile", { token: regToken, fullname });
+  } catch (e) {
+    // tolerate re-runs where the account already exists; rethrow anything else
+    if (!/already|exists|registered/i.test(String(e.message))) throw e;
+  }
+} catch (e) {
+  // tolerate re-runs where the account already exists; rethrow anything else
+  if (!/already|exists|registered/i.test(String(e.message))) throw e;
+}
 
 // 2. login to obtain an authenticated session cookie
-const loginRes = await fetch(`${process.env.PENPOT_HL_BASE ?? "http://localhost:9101"}/api/rpc/command/login-with-password`, {
+const loginRes = await fetch(`${BASE}/api/rpc/command/login-with-password`, {
   method: "POST",
   headers: { "Content-Type": "application/json", Accept: "application/json" },
   body: JSON.stringify({ email, password }),
 });
 if (!loginRes.ok) throw new Error(`login failed: ${loginRes.status}`);
 const setCookie = loginRes.headers.get("set-cookie");
+if (!setCookie) throw new Error("login succeeded but no set-cookie header");
 const authCookie = setCookie.split(";")[0]; // auth-token=...
 const profile = await loginRes.json();
 
 // helper that calls RPC with the session cookie
 async function rpcCookie(name, body) {
-  const res = await fetch(`${process.env.PENPOT_HL_BASE ?? "http://localhost:9101"}/api/rpc/command/${name}`, {
+  const res = await fetch(`${BASE}/api/rpc/command/${name}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json", Cookie: authCookie },
     body: JSON.stringify(body ?? {}),

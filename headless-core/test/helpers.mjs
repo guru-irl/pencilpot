@@ -16,7 +16,7 @@ async function rpc(name, body, { token, method = "POST" } = {}) {
   return { json, headers: res.headers };
 }
 
-// transit-typed responses (prepare-register) come back as ["^ ","~:token", "..."] arrays
+// some responses (e.g. transit mode) wrap values as ["^ ","~:token", ...]; also handle plain {token}
 function transitToken(json) {
   if (Array.isArray(json)) { const i = json.indexOf("~:token"); return i >= 0 ? json[i + 1] : undefined; }
   return json?.token;
