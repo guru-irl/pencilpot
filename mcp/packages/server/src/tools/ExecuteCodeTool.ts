@@ -16,12 +16,27 @@ export class ExecuteCodeArgs {
             .string()
             .min(1, "Code cannot be empty")
             .describe("The JavaScript code to execute in the plugin context."),
+        timeoutSecs: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe(
+                "Optional execution timeout for THIS call, in seconds. Increase it when running a " +
+                    "large batch of operations that may take longer than the default. If omitted, the " +
+                    "server's configured default (PENPOT_MCP_TASK_TIMEOUT_SECS, default 30s) applies."
+            ),
     };
 
     /**
      * The JavaScript code to execute in the plugin context.
      */
     code!: string;
+
+    /**
+     * Optional per-call execution timeout, in seconds.
+     */
+    timeoutSecs?: number;
 }
 
 /**
@@ -67,7 +82,7 @@ export class ExecuteCodeTool extends Tool<ExecuteCodeArgs> {
     protected async executeCore(args: ExecuteCodeArgs): Promise<ToolResponse> {
         const taskParams: ExecuteCodeTaskParams = { code: args.code };
         const task = new ExecuteCodePluginTask(taskParams);
-        const result = await this.mcpServer.pluginBridge.executePluginTask(task);
+        const result = await this.mcpServer.pluginBridge.executePluginTask(task, args.timeoutSecs);
 
         if (result.data !== undefined) {
             return new TextResponse(JSON.stringify(result.data, null, 2));

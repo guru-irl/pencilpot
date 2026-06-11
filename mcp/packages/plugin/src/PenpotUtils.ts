@@ -2,6 +2,30 @@ import { Board, Bounds, Fill, FlexLayout, GridLayout, Page, Rectangle, Shape, Te
 
 export class PenpotUtils {
     /**
+     * Returns a shape's children, never throwing.
+     *
+     * A corrupt shape (e.g. a board poisoned by a failed resize, pain point #1) can throw
+     * a `TypeError` merely on accessing `.children`. Traversal helpers route child access
+     * through this method so that one bad node is isolated rather than aborting the walk.
+     *
+     * @param shape - the shape whose children to read
+     * @returns the children array, or an empty array if the shape has none or access throws
+     */
+    public static safeChildren(shape: Shape | null | undefined): Shape[] {
+        if (!shape) {
+            return [];
+        }
+        try {
+            if ("children" in shape && shape.children) {
+                return shape.children as Shape[];
+            }
+        } catch {
+            // a corrupt shape can throw on property access; isolate it
+        }
+        return [];
+    }
+
+    /**
      * Generates an overview structure of the given shape,
      * providing its id, name and type, and recursively its children's attributes.
      * The `type` field indicates the type in the Penpot API.
@@ -76,17 +100,23 @@ export class PenpotUtils {
     public static findShapes(predicate: (shape: Shape) => boolean, root: Shape | null = null): Shape[] {
         let result = new Array<Shape>();
 
+        // Fault-isolated traversal: a single corrupt shape (e.g. a board left in a
+        // half-mutated state by a failed resize, pain point #1) must not abort the whole
+        // walk. Each node's predicate evaluation and child access is guarded so that a
+        // throwing node is skipped and its siblings/cousins are still visited.
         let find = function (shape: Shape | null) {
             if (!shape) {
                 return;
             }
-            if (predicate(shape)) {
-                result.push(shape);
-            }
-            if ("children" in shape && shape.children) {
-                for (let child of shape.children) {
-                    find(child);
+            try {
+                if (predicate(shape)) {
+                    result.push(shape);
                 }
+            } catch {
+                // skip a node whose predicate evaluation throws
+            }
+            for (let child of PenpotUtils.safeChildren(shape)) {
+                find(child);
             }
         };
 
@@ -110,19 +140,23 @@ export class PenpotUtils {
      * @param root - The root shape to start the search from (if null, searches all pages)
      */
     public static findShape(predicate: (shape: Shape) => boolean, root: Shape | null = null): Shape | null {
+        // Fault-isolated traversal (see findShapes): one corrupt shape must not break the
+        // global lookup that findShapeById relies on.
         let find = function (shape: Shape | null): Shape | null {
             if (!shape) {
                 return null;
             }
-            if (predicate(shape)) {
-                return shape;
+            try {
+                if (predicate(shape)) {
+                    return shape;
+                }
+            } catch {
+                // skip a node whose predicate evaluation throws
             }
-            if ("children" in shape && shape.children) {
-                for (let child of shape.children) {
-                    let result = find(child);
-                    if (result) {
-                        return result;
-                    }
+            for (let child of PenpotUtils.safeChildren(shape)) {
+                let result = find(child);
+                if (result) {
+                    return result;
                 }
             }
             return null;
@@ -420,18 +454,29 @@ export class PenpotUtils {
      *   - For mode="fill", it will be whatever format the fill image is stored in.
      */
     public static async exportImage(shape: Shape, mode: "shape" | "fill", asSVG: boolean): Promise<Uint8Array> {
-        // Updates are asynchronous in Penpot, so wait a tick to ensure any pending updates are applied before export.
-        // The constant wait time is a temporary workardound until a better solution for penpot/penpot-mcp#27
-        // is implemented.
-        await new Promise((resolve) => setTimeout(resolve, 200));
-        // Perform export
+        // Penpot applies edits asynchronously, so a naive export right after an edit can
+        // return a pre-edit (stale) raster — pain point #14. Rather than a single blind
+        // sleep, we export repeatedly until two consecutive results are byte-identical
+        // (the render pipeline has settled) or a small attempt budget is exhausted.
+        // Both the wait and the budget are configurable; a budget of 1 reproduces the old
+        // single-export behaviour.
+        const waitMs = PenpotUtils.numberFromEnv("PENPOT_MCP_EXPORT_STABILIZE_WAIT_MS", 200);
+        const maxAttempts = PenpotUtils.numberFromEnv("PENPOT_MCP_EXPORT_STABILIZE_ATTEMPTS", 3);
+
         switch (mode) {
             case "shape":
-                return shape.export({ type: asSVG ? "svg" : "png" });
-            case "fill":
+                // stabilization only helps for rendered shapes; image fills are read directly below
+                return PenpotUtils.exportUntilStable(() => shape.export({ type: asSVG ? "svg" : "png" }), {
+                    waitMs,
+                    maxAttempts,
+                });
+            case "fill": {
                 if (asSVG) {
                     throw new Error("Image fills cannot be exported as SVG");
                 }
+                // a fill's stored bytes are not subject to the render race, but still wait
+                // once for any pending edit (e.g. a just-uploaded fill) to apply
+                await new Promise((resolve) => setTimeout(resolve, waitMs));
                 // check whether the shape has the `fills` member
                 if (!("fills" in shape)) {
                     throw new Error("Shape with `fills` member is required for fill export mode");
@@ -445,9 +490,75 @@ export class PenpotUtils {
                     }
                 }
                 throw new Error("No fill with image data found in the shape");
+            }
             default:
                 throw new Error(`Unsupported export mode: ${mode}`);
         }
+    }
+
+    /**
+     * Reads a non-negative integer from the environment-like global, falling back to a
+     * default. Browser plugin code has no `process.env`; this tolerates its absence.
+     */
+    private static numberFromEnv(name: string, fallback: number): number {
+        try {
+            // @ts-ignore - process may not exist in the plugin sandbox
+            const raw = typeof process !== "undefined" ? process?.env?.[name] : undefined;
+            if (raw !== undefined) {
+                const parsed = parseInt(raw, 10);
+                if (Number.isFinite(parsed) && parsed >= 0) {
+                    return parsed;
+                }
+            }
+        } catch {
+            // ignore and use the fallback
+        }
+        return fallback;
+    }
+
+    /**
+     * Returns true iff two byte arrays have identical length and content.
+     */
+    public static bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+        if (a.length !== b.length) {
+            return false;
+        }
+        for (let i = 0; i < a.length; i++) {
+            if (a[i] !== b[i]) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Repeatedly invokes `exporter` until two consecutive results are byte-identical
+     * (indicating the render pipeline has settled) or the attempt budget is exhausted, in
+     * which case the most recent result is returned.
+     *
+     * @param exporter - produces the current export bytes
+     * @param opts.waitMs - delay before each export
+     * @param opts.maxAttempts - maximum number of exports (>=1; 1 = single export, old behaviour)
+     * @param opts.sleep - injectable delay function (defaults to setTimeout); used by tests
+     */
+    public static async exportUntilStable(
+        exporter: () => Promise<Uint8Array>,
+        opts: { waitMs: number; maxAttempts: number; sleep?: (ms: number) => Promise<void> }
+    ): Promise<Uint8Array> {
+        const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+        const maxAttempts = Math.max(1, opts.maxAttempts);
+
+        await sleep(opts.waitMs);
+        let previous = await exporter();
+        for (let attempt = 1; attempt < maxAttempts; attempt++) {
+            await sleep(opts.waitMs);
+            const current = await exporter();
+            if (PenpotUtils.bytesEqual(previous, current)) {
+                return current;
+            }
+            previous = current;
+        }
+        return previous;
     }
 
     /**

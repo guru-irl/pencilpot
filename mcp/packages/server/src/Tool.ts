@@ -3,6 +3,7 @@ import "reflect-metadata";
 import { TextResponse, ToolResponse } from "./ToolResponse";
 import type { PenpotMcpServer, SessionContext } from "./PenpotMcpServer";
 import { createLogger } from "./logger";
+import { describeError } from "./utils/errors";
 
 /**
  * An empty arguments class for tools that do not require any parameters.
@@ -52,7 +53,7 @@ export abstract class Tool<TArgs extends object> {
             return result;
         } catch (error) {
             this.logger.error("Tool execution #%d failed: %s; error: %s", executionId, this.getToolName(), error);
-            return new TextResponse(`Tool execution failed: ${String(error)}`);
+            return new TextResponse(`Tool execution failed: ${describeError(error)}`);
         }
     }
 

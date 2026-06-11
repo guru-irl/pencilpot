@@ -11,6 +11,7 @@
     "build:types": "bash ./scripts/build-types",
     "start": "pnpm -r --parallel run start",
     "start:multi-user": "pnpm -r --parallel run start:multi-user",
+    "test": "pnpm -r --if-present run test",
     "bootstrap": "pnpm -r install && pnpm run build && pnpm run start",
     "bootstrap:multi-user": "pnpm -r install && pnpm run build && pnpm run start:multi-user",
     "fmt": "prettier --write packages/",

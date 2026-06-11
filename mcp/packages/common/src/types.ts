@@ -30,6 +30,14 @@ export interface PluginTaskRequest {
      * The parameters for task execution.
      */
     params: any;
+
+    /**
+     * Optional execution timeout, in seconds, resolved by the issuing instance. Carried in
+     * the request so that, when a task is forwarded to another instance over Redis
+     * (multi-instance mode), the receiving instance arms its timeout with the same deadline
+     * rather than falling back to its own default.
+     */
+    timeoutSecs?: number;
 }
 
 /**

@@ -13,6 +13,7 @@
     "start:dev": "node --import ts-node/register src/index.ts",
     "start:dev:multi-user": "node --loader ts-node/esm src/index.ts --multi-user",
     "test:integration:export-sema": "tsx scripts/integration-test-export-image-semaphore.ts",
+    "test": "node --import tsx --test \"test/*.test.ts\"",
     "types:check": "tsc --noEmit",
     "clean": "rm -rf dist/"
   },

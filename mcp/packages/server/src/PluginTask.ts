@@ -39,6 +39,13 @@ export abstract class AbstractPluginTask<TParams = any, TResult extends PluginTa
     public readonly params: TParams;
 
     /**
+     * Optional resolved execution timeout, in seconds. Set by the bridge when dispatching so
+     * that it is serialized into the request and survives a cross-instance (Redis) forwarding
+     * hop. `undefined` means "use the dispatching bridge's configured default".
+     */
+    public timeoutSecs?: number;
+
+    /**
      * Creates a new plugin task instance.
      *
      * @param task - The name of the task to execute
@@ -60,6 +67,7 @@ export abstract class AbstractPluginTask<TParams = any, TResult extends PluginTa
             id: this.id,
             task: this.task,
             params: this.params,
+            timeoutSecs: this.timeoutSecs,
         };
     }
 

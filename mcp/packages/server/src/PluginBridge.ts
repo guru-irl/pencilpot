@@ -6,6 +6,7 @@ import { PluginTaskRequest, PluginTaskResponse, PluginTaskResult } from "@penpot
 import { createLogger } from "./logger";
 import type { PenpotMcpServer } from "./PenpotMcpServer";
 import type { RedisBridge } from "./RedisBridge";
+import { resolveTaskTimeoutSecs } from "./utils/taskTimeout";
 
 const KEEP_ALIVE_TIME = 30000; // 30 seconds
 
@@ -36,13 +37,16 @@ export class PluginBridge {
      *   When provided, tasks handled by this instance are routed to the instance
      *   holding the relevant plugin's WebSocket connection (which may be this same
      *   instance) via Redis, rather than dispatched directly over a local socket.
-     * @param taskTimeoutSecs - Timeout, in seconds, for plugin task execution
+     * @param taskTimeoutSecs - Default timeout, in seconds, for plugin task execution.
+     *   When omitted, it is resolved from the `PENPOT_MCP_TASK_TIMEOUT_SECS` environment
+     *   variable (falling back to the built-in default). Individual tasks may override it
+     *   per call via {@link executePluginTask}.
      */
     constructor(
         public readonly mcpServer: PenpotMcpServer,
         private port: number,
         private readonly redisBridge?: RedisBridge,
-        private taskTimeoutSecs: number = 30
+        private taskTimeoutSecs: number = resolveTaskTimeoutSecs(process.env.PENPOT_MCP_TASK_TIMEOUT_SECS)
     ) {
         this.wsServer = new WebSocketServer({ port: port });
         this.setupWebSocketHandlers();
@@ -239,12 +243,15 @@ export class PluginBridge {
      * and awaiting the result.
      *
      * @param task - The plugin task to execute
+     * @param timeoutSecs - Optional per-call timeout override, in seconds. When omitted or
+     *   non-positive, the bridge's configured default ({@link taskTimeoutSecs}) applies.
      * @throws Error if no plugin instances are connected or available
      */
     public async executePluginTask<TResult extends PluginTaskResult<any>>(
-        task: PluginTask<any, TResult>
+        task: PluginTask<any, TResult>,
+        timeoutSecs?: number
     ): Promise<TResult> {
-        this.sendPluginTask(task, this.redisBridge !== undefined);
+        this.sendPluginTask(task, this.redisBridge !== undefined, undefined, timeoutSecs);
         return await task.getResultPromise();
     }
 
@@ -263,9 +270,24 @@ export class PluginBridge {
      * @param connection - The connection to use for a local (non-remote) dispatch; when
      *   omitted, the session's connection is resolved via {@link getClientConnection}.
      *   Ignored when `useRedis` is true.
+     * @param timeoutSecs - Optional per-call timeout override, in seconds; falls back to the
+     *   configured default when omitted or non-positive.
      * @throws Error if a local dispatch is required but no suitable connection is available
      */
-    private sendPluginTask(task: AbstractPluginTask<any, any>, useRedis: boolean, connection?: ClientConnection): void {
+    private sendPluginTask(
+        task: AbstractPluginTask<any, any>,
+        useRedis: boolean,
+        connection?: ClientConnection,
+        timeoutSecs?: number
+    ): void {
+        const effectiveTimeoutSecs =
+            timeoutSecs !== undefined && Number.isFinite(timeoutSecs) && timeoutSecs > 0
+                ? timeoutSecs
+                : this.taskTimeoutSecs;
+        // Record the resolved timeout on the task so it is serialized into the request and
+        // survives a cross-instance (Redis) forwarding hop; otherwise the receiving instance
+        // would re-arm with its own default and could kill a long task early.
+        task.timeoutSecs = effectiveTimeoutSecs;
         let onTimeout: (() => void) | undefined;
 
         if (useRedis) {
@@ -306,10 +328,10 @@ export class PluginBridge {
                 this.taskTimeouts.delete(task.id);
                 onTimeout?.();
                 pendingTask.rejectWithError(
-                    new Error(`Task ${task.id} timed out after ${this.taskTimeoutSecs} seconds`)
+                    new Error(`Task ${task.id} timed out after ${effectiveTimeoutSecs} seconds`)
                 );
             }
-        }, this.taskTimeoutSecs * 1000);
+        }, effectiveTimeoutSecs * 1000);
 
         this.taskTimeouts.set(task.id, timeoutHandle);
         this.logger.info(`Sent task ${task.id}`);
@@ -346,7 +368,8 @@ export class PluginBridge {
         }
 
         try {
-            this.sendPluginTask(task, false, connection);
+            // propagate the issuer-resolved timeout so this instance arms the same deadline
+            this.sendPluginTask(task, false, connection, request.timeoutSecs);
         } catch (error) {
             task.rejectWithError(error instanceof Error ? error : new Error(String(error)));
         }
