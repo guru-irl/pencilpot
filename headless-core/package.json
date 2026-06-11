@@ -6,5 +6,8 @@
   "scripts": {
     "build": "clojure -M:dev:shadow-cljs release headless",
     "watch": "clojure -M:dev:shadow-cljs watch headless"
+  },
+  "dependencies": {
+    "date-fns": "^4.1.0"
   }
 }
