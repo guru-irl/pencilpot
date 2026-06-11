@@ -1,0 +1,10 @@
+{
+  "name": "@penpot/headless-core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "clojure -M:dev:shadow-cljs release headless",
+    "watch": "clojure -M:dev:shadow-cljs watch headless"
+  }
+}

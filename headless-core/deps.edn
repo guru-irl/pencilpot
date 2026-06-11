@@ -1,0 +1,8 @@
+{:deps {penpot/common {:local/root "../common"}}
+ :aliases
+ {:dev
+  {:extra-deps {thheller/shadow-cljs {:mvn/version "3.2.2"}}
+   :jvm-opts ["--sun-misc-unsafe-memory-access=allow"
+              "--enable-native-access=ALL-UNNAMED"]}
+  :shadow-cljs
+  {:main-opts ["-m" "shadow.cljs.devtools.cli"]}}}
