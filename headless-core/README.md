@@ -1,9 +1,8 @@
-# headless-core — Penpot Headless SDK (Phase 0)
+# headless-core — Penpot Headless SDK (Phase 1a)
 
-> **Status: Phase 0 complete.** Proof-of-concept that a geometry-complete board can be
-> added to a real Penpot file purely headlessly — no browser, no plugin — by compiling
-> Penpot's own `common/**.cljc` namespaces into a Node ESM bundle and POSTing changes
-> through the `update-file` RPC.
+> **Status: Phase 1a complete.** Full working-copy API — `checkout → edit → commit` — built
+> on top of Penpot's own `app.common.*` engine, with a live round-trip test gate against
+> `penpot-hl` and a one-command `npm run verify` that proves all four layers green.
 
 ---
 
@@ -180,21 +179,120 @@ The `enable-access-tokens` flag is set on `penpot-hl` (required for
 
 ---
 
-## What's next (Phase 1)
+---
 
-Phase 0 establishes the facade pattern: reuse `app.common.*` via shadow-cljs ESM
-compilation for any operation that needs geometry or change-building parity.
+## Phase 1a — Working Copy
 
-Phase 1 builds on this with:
+### The `WorkingCopy` API
 
-- **Working-copy / session manager** — `checkout → edit → commit` with `revn`/`vern`
-  rebase and conflict handling.
-- **Scripting runtime + helpers** — higher-level JS/TS API for common operations
-  (add frame, add text, set fill, etc.).
-- **MCP server + `pp` CLI** — expose headless ops as MCP tools and a command-line
-  interface.
-- **Skill integration** — Claude Code skill that drives the MCP server for design
-  automation.
+`WorkingCopy` is the Phase 1a high-level API for headless editing. It wraps the
+session manager and provides a structured checkout → edit → commit workflow:
+
+```js
+import { WorkingCopy } from './sdk/WorkingCopy.mjs';
+
+// 1. Checkout — fetches the current file state from the server
+const wc = await new WorkingCopy(fileId, token).checkout();
+
+// 2. Edit — all mutations are in-memory; nothing hits the network yet
+const b = wc.addBoard({ x: 0, y: 0, width: 800, height: 600, name: 'Main' });
+wc.addRect({ x: 20, y: 20, width: 200, height: 100, name: 'Box',
+             parentId: b, fills: [{ fillColor: '#FF3333' }] });
+wc.closeBoard();
+
+// 3. Validate — runs Penpot's own validate-file-schema! as the parity oracle
+wc.validate();
+
+// 4. Commit — encodes accumulated changes as transit+json and POSTs update-file
+await wc.commit();
+```
+
+`addBoard()` returns the new board's UUID string; pass it as `parentId` to
+`addRect()` (or any other shape adder) to nest the shape inside the board.
+`closeBoard()` finalises the current board's `objects` index so the frame is
+ready to be read back.
+
+### Session model
+
+Internally `WorkingCopy` delegates to a `HeadlessSession`, which holds all
+in-memory state:
+
+| Stage | What happens |
+|---|---|
+| **`checkout`** | Calls `get-file` via JSON RPC. Records `revn`, `vern`, `features`, and the full `objects` map. |
+| **`setup-shape`** | Each shape adder calls Penpot's own `app.common.types.shape/setup-shape`, computing `selrect`, `transform`, and `points` in-process. |
+| **`process-changes`** | Changes are fed through `app.common.files.changes/process-changes` to update the local `objects` map — the same function Penpot's frontend uses. |
+| **`accumulate`** | The raw `add-obj` operations are accumulated in a changes list throughout the editing session. |
+| **`commit`** | `app.common.transit/encode-str` encodes the full changes payload; `POST /api/rpc/command/update-file` sends it. |
+| **conflict handling** | If the server returns a 400 stale-revn error, `WorkingCopy` calls `get-file` again to refresh `revn`/`vern`, then resubmits the unchanged accumulated changes. |
+| **`validate`** | Calls `app.common.files.validate/validate-file-schema!` on the local objects map. This is the same validator Penpot's backend runs, so it acts as a 1:1 parity oracle before the network round-trip. |
+
+After `commit()` the accumulated changes list is cleared, and the session's
+`revn`/`vern` are updated to match the server's response.
+
+---
+
+## One-command gate: `npm run verify`
+
+```bash
+cd headless-core
+npm run verify
+```
+
+This runs four layers in sequence; any failure stops the chain:
+
+| Script | What it checks |
+|---|---|
+| `npm run build` | shadow-cljs compiles `src/app/headless/core.cljs` (+ all `app.common.*` deps) to `target/headless/penpot.js` with 0 warnings. |
+| `npm run test:unit` | Node built-in test runner executes `test/session.test.mjs` and `test/facade.test.mjs`. Covers the `HeadlessSession` state machine (setup-shape + process-changes in-process) and the `buildAddBoardChange` / `buildAddBoardBody` facade exports. No network required. |
+| `npm run test:engine` | `scripts/test-engine.mjs` loads Penpot's own `cljs.test`-compiled common suites via the built bundle and runs every `deftest` in `common-tests.geom.*`, `common-tests.types.*`, and `common-tests.files.*`. These are Penpot's upstream unit tests — ~14 000+ assertions — running against the exact compiled code the headless SDK uses. A failure here means a Penpot-engine regression, not an SDK bug. No network required. |
+| `npm run test:roundtrip` | `test/workingcopy.roundtrip.test.mjs` hits the live `penpot-hl` instance (port 9101). It calls `checkout`, adds a board and a rect, calls `validate`, calls `commit`, then re-fetches the file and asserts both shapes persist with correct geometry. Reads credentials from `infra/penpot-hl/test-env.json`. |
+
+### Running `penpot-hl`
+
+The roundtrip test requires the throwaway Penpot instance to be running:
+
+```bash
+sudo docker compose -p penpot-hl -f infra/penpot-hl/docker-compose.yaml up -d
+```
+
+Then provision credentials once if the volumes are fresh:
+
+```bash
+node test/setup-env.mjs
+```
+
+### Individual layers
+
+```bash
+npm run build          # compile only
+npm run test:unit      # unit (no network)
+npm run test:engine    # engine parity gate (no network)
+npm run test:roundtrip # live round-trip (penpot-hl must be up)
+```
+
+---
+
+## What's next (Phase 1b deferrals)
+
+The following are deliberately out of scope for Phase 1a:
+
+- **Text shapes** — `addText()` needs DOM-measured `position-data` (per-glyph
+  layout metrics) which requires a browser or headless Chromium. Not available in
+  the pure Node runtime.
+- **Flex / grid reflow** — `app.common.types.shape.layout` reflow calls are
+  implemented in `app.common.*` but the integration into the headless session (auto
+  layout propagation on commit) is deferred.
+- **`script(js)` sandbox** — user-supplied JS snippets evaluated inside the
+  working-copy session.
+- **`pp` CLI** — a command-line interface that drives `WorkingCopy` ops from shell
+  scripts and CI pipelines.
+- **MCP server** — exposes headless ops as MCP tools consumable by Claude Code.
+- **Claude Code skill** — a `/penpot-headless` skill that drives the MCP server for
+  AI-assisted design automation.
+- **Golden dump-file snapshots** — deterministic `get-file` response fixtures for
+  offline regression testing, eliminating the `penpot-hl` dependency from
+  `test:roundtrip`.
 
 See:
 - `docs/superpowers/specs/2026-06-11-penpot-headless-sdk-design.md`
