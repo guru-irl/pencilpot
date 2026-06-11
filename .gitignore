@@ -100,3 +100,4 @@
 /opencode.json
 /.codex/
 /tools/__pycache__
+infra/penpot-hl/test-env.json
