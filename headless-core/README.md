@@ -132,7 +132,7 @@ PENPOT_HL_BASE=http://localhost:9101 node --test test/roundtrip.test.mjs
 `src/app/headless/core.cljs` calls Penpot's own `setup-shape` to produce a
 geometry-complete shape map (selrect, points, transform), then threads it through `pcb`
 to build the `add-obj` change, and finally passes the full changes list through
-`app.common.transit/encode` to produce the wire-ready transit+json string.
+`app.common.transit/encode-str` to produce the wire-ready transit+json string.
 
 shadow-cljs compiles this to `target/headless/penpot.js` as an ES module, exporting the
 two functions above. Because the compilation target is `:esm` + `:node`, all of Penpot's
@@ -150,7 +150,7 @@ CLJS macros and conditional reader forms work correctly.
 
 **Why transit for writes?** The `update-file` body contains Penpot record types
 (`Shape`, `Matrix`, `Point`). These are opaque to plain JSON but are first-class transit
-tagged values. Using `app.common.transit/encode` on the ClojureScript side means the
+tagged values. Using `app.common.transit/encode-str` on the ClojureScript side means the
 backend's transit decoder receives the correct typed records — no manual conversion, no
 drift.
 
