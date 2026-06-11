@@ -98,7 +98,10 @@
   [args-json]
   (let [{:keys [empty dataTransit fileId features]} (args args-json)
         file-id (if fileId (uuid/uuid fileId) (uuid/next))
-        data    (if empty (empty-data) (t/decode-str dataTransit))
+        ;; get-file transit decodes to a FULL FILE map (keys: :id :data :revn
+        ;; :vern :features ...), so unwrap :data; tolerate a bare data value too.
+        decoded (when-not empty (t/decode-str dataTransit))
+        data    (if empty (empty-data) (or (:data decoded) decoded))
         page-id (or (page-id-of data) (first (:pages data)))
         feats   (or features ["components/v2" "fdata/shape-data-type" "fdata/path-data"
                               "styles/v2" "layout/grid" "plugins/runtime"])]
