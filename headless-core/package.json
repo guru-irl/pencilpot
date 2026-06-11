@@ -5,7 +5,11 @@
   "type": "module",
   "scripts": {
     "build": "clojure -M:dev:shadow-cljs release headless",
-    "watch": "clojure -M:dev:shadow-cljs watch headless"
+    "watch": "clojure -M:dev:shadow-cljs watch headless",
+    "test:unit": "node --test test/session.test.mjs test/facade.test.mjs",
+    "test:engine": "node scripts/test-engine.mjs",
+    "test:roundtrip": "node --test test/workingcopy.roundtrip.test.mjs",
+    "verify": "npm run build && npm run test:unit && npm run test:engine && npm run test:roundtrip"
   },
   "dependencies": {
     "date-fns": "^4.1.0"
