@@ -40,3 +40,15 @@ test("addRect honors parentId pointing at a non-top-of-stack board", () => {
   assert.equal(objs[r]["parent-id"] ?? objs[r].parentId, b1, "rect parented under the requested board, not the stack top/root");
   assert.deepEqual(JSON.parse(s.validate()), []);
 });
+
+test("clearChanges resets recorded changes (no double-commit)", () => {
+  const s = createSession(JSON.stringify({ empty: true }));
+  s.addBoard(JSON.stringify({ x: 0, y: 0, width: 100, height: 100, name: "B" }));
+  assert.equal(JSON.parse(s.pendingChanges()).length, 1);
+  // simulate a commit: produce the body, then clear
+  s.commitBody(JSON.stringify({ sessionId: "00000000-0000-0000-0000-000000000001", revn: 0, vern: 0 }));
+  s.clearChanges();
+  assert.equal(JSON.parse(s.pendingChanges()).length, 0);
+  s.addRect(JSON.stringify({ x: 10, y: 10, width: 20, height: 20 }));
+  assert.equal(JSON.parse(s.pendingChanges()).length, 1, "only the new change is pending");
+});

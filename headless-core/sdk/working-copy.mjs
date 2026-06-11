@@ -3,20 +3,18 @@ import { createSession } from "../target/headless/penpot.js";
 import { getFile, updateFile } from "./rpc.mjs";
 
 export class WorkingCopy {
-  constructor(fileId, token) { this.fileId = fileId; this.token = token; this._ops = []; }
+  constructor(fileId, token) { this.fileId = fileId; this.token = token; }
 
   async checkout() {
     const f = await getFile(this.fileId, this.token);
     this.revn = f.revn; this.vern = f.vern; this.features = f.features;
     this.session = createSession(JSON.stringify({ dataTransit: f.dataTransit, fileId: this.fileId, features: f.features }));
-    this._ops = [];
     return this;
   }
 
-  _do(method, payload) { this._ops.push([method, payload]); return this.session[method](payload === undefined ? undefined : JSON.stringify(payload)); }
-  addBoard(p) { return this._do("addBoard", p); }
-  addRect(p)  { return this._do("addRect", p); }
-  closeBoard(){ return this._do("closeBoard", undefined); }
+  addBoard(p) { return this.session.addBoard(JSON.stringify(p)); }
+  addRect(p)  { return this.session.addRect(JSON.stringify(p)); }
+  closeBoard(){ return this.session.closeBoard(); }
 
   validate() { return JSON.parse(this.session.validate()); }
   pendingChanges() { return JSON.parse(this.session.pendingChanges()); }
@@ -27,14 +25,14 @@ export class WorkingCopy {
     const body = this.session.commitBody(JSON.stringify({ sessionId: randomUUID(), revn: this.revn, vern: this.vern }));
     try {
       const res = await updateFile(body, this.token);
-      this.revn = res.revn + 1;
+      this.revn = res.revn + 1;          // server returns pre-increment revn
+      this.session.clearChanges();        // don't re-send these changes on a later commit
       return res;
     } catch (e) {
       if (retries > 0 && /revn-conflict|vern-conflict/.test(String(e.message))) {
-        const ops = this._ops.slice();
-        await this.checkout();
-        for (const [m, p] of ops) this.session[m](p === undefined ? undefined : JSON.stringify(p));
-        this._ops = ops;
+        // append-only changes apply cleanly on any newer revn: just refresh revn/vern and resubmit the SAME recorded changes
+        const fresh = await getFile(this.fileId, this.token);
+        this.revn = fresh.revn; this.vern = fresh.vern;
         return this.commit({ retries: retries - 1 });
       }
       throw e;

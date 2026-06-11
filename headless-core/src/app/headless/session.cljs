@@ -85,6 +85,8 @@
                      (try (cfv/validate-file-schema! file) (js/JSON.stringify #js [])
                           (catch :default e (js/JSON.stringify #js [(ex-message e)])))))
        :pendingChanges (fn [] (js/JSON.stringify (->plain-js (:changes @state))))
+       :clearChanges
+       (fn [] (swap! state assoc :changes []) js/undefined)
        :commitBody
        (fn [json]
          (let [{:keys [sessionId revn vern]} (args json)
@@ -102,6 +104,9 @@
         ;; :vern :features ...), so unwrap :data; tolerate a bare data value too.
         decoded (when-not empty (t/decode-str dataTransit))
         data    (if empty (empty-data) (or (:data decoded) decoded))
+        _       (when-not empty
+                  (when-not (:pages data)
+                    (throw (ex-info "create-session: decoded file has no :pages (bad hydrate payload)" {}))))
         page-id (or (page-id-of data) (first (:pages data)))
         feats   (or features ["components/v2" "fdata/shape-data-type" "fdata/path-data"
                               "styles/v2" "layout/grid" "plugins/runtime"])]
