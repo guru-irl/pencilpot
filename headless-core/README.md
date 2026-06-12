@@ -198,6 +198,8 @@ const wc = await new WorkingCopy(fileId, token).checkout();
 const b = wc.addBoard({ x: 0, y: 0, width: 800, height: 600, name: 'Main' });
 wc.addRect({ x: 20, y: 20, width: 200, height: 100, name: 'Box',
              parentId: b, fills: [{ fillColor: '#FF3333' }] });
+wc.addEllipse({ x: 240, y: 20, width: 100, height: 100, name: 'Dot',
+                parentId: b, fills: [{ fillColor: '#22c55e' }] });
 wc.closeBoard();
 
 // 3. Validate — runs Penpot's own validate-file-schema! as the parity oracle
@@ -313,7 +315,7 @@ See:
 | Tool | Description |
 |---|---|
 | `checkout` | Load a Penpot file into a headless working copy (`fileId` arg). Returns current `revn` and object count. |
-| `script` | Run a JS snippet against the working copy (`code` arg). Globals: `wc` (`addBoard`, `addRect`, `addText`, `closeBoard`, `setFlexLayout`, `validate`, `pendingChanges`). Many edits in one call; no network until `commit`. |
+| `script` | Run a JS snippet against the working copy (`code` arg). Globals: `wc` (`addBoard`, `addRect`, `addEllipse`, `addText`, `closeBoard`, `setFlexLayout`, `validate`, `pendingChanges`). Many edits in one call; no network until `commit`. |
 | `scene` | Return the full working-copy object map (id → shape). |
 | `validate` | Run Penpot's own `validate-file-schema!` on the local state. Returns `[]` on success; error details otherwise. |
 | `status` | Pending (uncommitted) change count + current `revn`. |
@@ -482,7 +484,7 @@ standalone integration/sanity script (cf. `mcp/packages/server/scripts/integrati
 
 The following remain out of scope:
 
-- **Ellipses / paths / components** — not yet exposed via `wc`.
+- **Paths / components** — not yet exposed via `wc`.
 - **`pp` CLI** — shell-friendly command-line interface wrapping `WorkingCopy` ops.
 - **Full Claude Code teaching skill** — a `/penpot-headless` skill that drives the
   MCP server with guided prompts for AI-assisted design automation.
