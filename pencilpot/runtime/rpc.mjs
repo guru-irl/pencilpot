@@ -1,12 +1,17 @@
 // Real RPC handlers: get-file/update-file from on-disk EDN store + synthetic
 // boot stubs for all other SPA endpoints.
+import path from "node:path";
 import { createSession } from "../../headless-core/target/headless/penpot.js";
 import { readDesign, writeDesign } from "../store/index.mjs";
+import { resolveProjectRoot } from "../store/project.mjs";
 import { readBody } from "./proxy.mjs";
 import { stub, isStub, buildUpdateFileResponse } from "./stubs.mjs";
 
 /** Extract the RPC command name from a URL like /api/main/methods/get-file?... */
 const cmd = (url) => url.split("?")[0].split("/").filter(Boolean).pop();
+
+/** Extract a query-param value from a URL string. */
+const qp = (url, key) => new URL("http://h" + url).searchParams.get(key);
 
 /** Hydrate a session from the on-disk store at `dir`. */
 function sessionFor(dir) {
@@ -71,6 +76,82 @@ export function updateFileJson(dir, changesJson) {
   return persistChanges(dir, (s) => s.applyChanges(changesJson));
 }
 
+/**
+ * Parse the `:libraries` vector from a manifest EDN string.
+ * Returns an array of { id: "<uuid-string>", path: "<rel-path>" }.
+ * The manifest always serializes as:
+ *   :libraries [{:id #uuid "…" :path "…"} …]
+ */
+function parseLibrariesFromManifest(manifestEdn) {
+  const outer = manifestEdn.match(/:libraries\s*\[([^\]]*)\]/s);
+  if (!outer) return [];
+  const inner = outer[1].trim();
+  if (!inner) return [];
+  const entries = [];
+  const re = /\{:id\s+#uuid\s+"([^"]+)"\s+:path\s+"([^"]+)"\}/g;
+  let m;
+  while ((m = re.exec(inner)) !== null) {
+    entries.push({ id: m[1], path: m[2] });
+  }
+  return entries;
+}
+
+/**
+ * Resolve the linked shared libraries for a design file.
+ *
+ * Reads `:libraries` from the design's manifest, loads each linked
+ * `shared/*.penpot` from `projectRoot` via the headless engine, and
+ * returns an array of library metadata objects:
+ *   [ { id, name, revn, vern, features, data, components } ]
+ *
+ * The returned objects carry the full `data` field (transit-decoded)
+ * so callers (tests or the HTTP handler) can assert component presence.
+ * The HTTP `get-file-libraries` handler encodes only the metadata subset
+ * needed by the SPA; `get-file?id=<libId>` serves the full transit payload.
+ */
+export function getFileLibraries(designDir, projectRoot) {
+  const manifest = readDesign(designDir).manifest;
+  const refs = parseLibrariesFromManifest(manifest);
+  return refs.map(({ id, path: libPath }) => {
+    const libDir = path.join(projectRoot, libPath);
+    const { meta } = getFile(libDir);
+    // Ensure id matches the manifest reference (getFile reads from the store,
+    // so meta.id is authoritative; use the manifest ref as a fallback label).
+    return { ...meta, id: meta.id ?? id };
+  });
+}
+
+/**
+ * Encode a list of library metadata objects as a transit+json array suitable
+ * for the `get-file-libraries` HTTP response.
+ *
+ * Penpot transit+json encodes maps as ["^ ", "~:key", value, ...].
+ * The SPA only reads :id and :synced-at from this response; it then fetches
+ * the full file data via get-file?id=<libId>.  We include :name / :revn so
+ * the workspace sidebar shows correct names without an extra round-trip.
+ *
+ * Timestamps: the SPA calls `check-libraries-synchronization` and shows a
+ * "library out of sync" banner when :modified-at > :synced-at.  We set both
+ * to the same ISO timestamp so the banner is suppressed.
+ */
+function encodeTransitLibraryList(libs) {
+  const now = new Date().toISOString();
+  const arr = libs.map(({ id, name, revn, vern, features }) =>
+    [
+      "^ ",
+      "~:id", id,
+      "~:name", name ?? "Library",
+      "~:revn", revn ?? 0,
+      "~:vern", vern ?? 0,
+      "~:features", features ?? [],
+      "~:is-shared", true,
+      "~:modified-at", now,
+      "~:synced-at", now,
+    ]
+  );
+  return JSON.stringify(arr);
+}
+
 // ---------------------------------------------------------------------------
 // HTTP router — called by server.mjs for every /api/* request
 // ---------------------------------------------------------------------------
@@ -81,7 +162,19 @@ export async function handleRpc(req, res, cfg) {
   const wantTransit = accept.includes("transit");
 
   if (command === "get-file") {
-    const { meta, transit } = getFile(cfg.design);
+    // The SPA calls get-file?id=<fileId> both for the main design and for each
+    // linked library.  Resolve which file to serve:
+    //   1. No ?id or ?id matches the design file → serve the main design.
+    //   2. ?id matches a linked library → serve that library from shared/.
+    const reqId = qp(req.url, "id");
+    let serveDir = cfg.design;
+    if (reqId && cfg.design) {
+      const projectRoot = resolveProjectRoot(cfg.design);
+      const libRefs = parseLibrariesFromManifest(readDesign(cfg.design).manifest);
+      const ref = libRefs.find(({ id }) => id === reqId);
+      if (ref) serveDir = path.join(projectRoot, ref.path);
+    }
+    const { meta, transit } = getFile(serveDir);
     res.writeHead(200, {
       "content-type": wantTransit ? "application/transit+json" : "application/json",
       "x-pencilpot-source": "disk",
@@ -101,9 +194,20 @@ export async function handleRpc(req, res, cfg) {
   }
 
   if (command === "get-file-libraries") {
-    // Task 7 fills this with real library data; for now stub empty list.
-    res.writeHead(200, { "content-type": "application/transit+json" });
-    res.end("[]");
+    // Return transit-encoded list of linked library metadata.
+    // If no design is configured, return empty (safe fallback).
+    if (!cfg.design) {
+      res.writeHead(200, { "content-type": "application/transit+json", "x-pencilpot-source": "disk" });
+      res.end("[]");
+      return;
+    }
+    const projectRoot = resolveProjectRoot(cfg.design);
+    const libs = getFileLibraries(cfg.design, projectRoot);
+    res.writeHead(200, {
+      "content-type": "application/transit+json",
+      "x-pencilpot-source": "disk",
+    });
+    res.end(encodeTransitLibraryList(libs));
     return;
   }
 
