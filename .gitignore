@@ -104,3 +104,5 @@ infra/penpot-hl/test-env.json
 pencilpot/spike/recordings/
 pencilpot/spike/store/
 pencilpot/spike/node_modules/
+pencilpot/**/node_modules/
+pencilpot/.scratch/
