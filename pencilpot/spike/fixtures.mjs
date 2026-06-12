@@ -5,13 +5,40 @@ import { fileURLToPath } from "node:url";
 
 const DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "recordings");
 
-// Map command-name -> { status, contentType, body:Buffer }. Last write wins (latest capture).
+// All-zeros UUID = anonymous profile; we never want to replay this.
+const ANON_UUID = "00000000-0000-0000-0000-000000000000";
+
+function isAnonymousProfile(command, body) {
+  if (command !== "get-profile") return false;
+  // Transit+json: the id field follows "~u" prefix
+  return body.includes(ANON_UUID);
+}
+
+// Map command-name -> { status, contentType, body:Buffer }.
+// Files are sorted so highest-seq number wins (last capture wins),
+// and anonymous get-profile captures are skipped.
 function load() {
   const map = new Map();
   if (!fs.existsSync(DIR)) return map;
-  for (const f of fs.readdirSync(DIR).filter((x) => x.endsWith(".json"))) {
+  const files = fs.readdirSync(DIR).filter((x) => x.endsWith(".json")).sort();
+  for (const f of files) {
     const meta = JSON.parse(fs.readFileSync(path.join(DIR, f), "utf8"));
-    const body = fs.readFileSync(path.join(DIR, f.replace(/\.json$/, ".body")));
+    const bodyPath = path.join(DIR, f.replace(/\.json$/, ".body"));
+    const body = fs.readFileSync(bodyPath);
+
+    // Skip anonymous profile responses; they redirect the SPA to /auth/login.
+    if (isAnonymousProfile(meta.command, body.toString("utf8"))) continue;
+
+    // Serve 401 get-enabled-flags as empty 200; a 401 causes the SPA to bounce.
+    if (meta.command === "get-enabled-flags" && meta.status === 401) {
+      map.set(meta.command, {
+        status: 200,
+        contentType: "application/transit+json",
+        body: Buffer.from("[]"),
+      });
+      continue;
+    }
+
     map.set(meta.command, { status: meta.status, contentType: meta.contentType, body });
   }
   return map;
