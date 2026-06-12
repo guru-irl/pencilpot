@@ -315,7 +315,7 @@ See:
 | Tool | Description |
 |---|---|
 | `checkout` | Load a Penpot file into a headless working copy (`fileId` arg). Returns current `revn` and object count. |
-| `script` | Run a JS snippet against the working copy (`code` arg). Globals: `wc` (`addBoard`, `addRect`, `addEllipse`, `addText`, `closeBoard`, `setFlexLayout`, `setGridLayout`, `setGrowType`, `setConstraints`, `addColorToken`, `tokens`, `validate`, `pendingChanges`). Many edits in one call; no network until `commit`. |
+| `script` | Run a JS snippet against the working copy (`code` arg). Globals: `wc` (`addBoard`, `addRect`, `addEllipse`, `addText`, `closeBoard`, `setFlexLayout`, `setGridLayout`, `setGrowType`, `setConstraints`, `createComponent`, `instantiateComponent`, `addColorToken`, `tokens`, `validate`, `pendingChanges`). Many edits in one call; no network until `commit`. |
 | `scene` | Return the full working-copy object map (id → shape). |
 | `validate` | Run Penpot's own `validate-file-schema!` on the local state. Returns `[]` on success; error details otherwise. |
 | `status` | Pending (uncommitted) change count + current `revn`. |
@@ -454,6 +454,30 @@ Tokens are file-level (not per-page) and persist through `commit`.
 wc.addColorToken({ set: "core", name: "color.primary", value: "#3366ff" });
 wc.addColorToken({ set: "core", name: "color.bg",      value: "#ffffff" });
 wc.tokens();   // → { sets: ["core"], tokens: [{ name: "color.primary", value: "#3366ff", type: "color" }, ...] }
+await wc.commit();
+```
+
+### Components
+
+`createComponent(boardId, {name})` promotes an existing board (a `:frame`) into a
+**main component**. It reuses Penpot's own component machinery (mirroring
+`app.common.files.builder/add-component`): it emits an `:add-component` change plus a
+`:mod-obj` that marks the board as `component-root` / `main-instance` and links it to
+the new component id and this file. It returns the new component id (UUID string).
+
+`instantiateComponent(componentId, {x, y})` instantiates a **copy** of an existing
+component at `(x, y)`, returning the copy's root shape id. It uses the common
+generator `app.common.logic.libraries/generate-instantiate-component`, so the produced
+copy carries the required `shape-ref` / `component-*` attrs — that is why we use the
+generator rather than hand-building copy shapes. Both methods produce changes that pass
+the server's component referential-integrity validation on `commit`.
+
+```js
+const b = wc.addBoard({ x: 0, y: 0, width: 200, height: 120, name: "Card" });
+wc.addRect({ x: 10, y: 10, width: 80, height: 40, parentId: b });
+wc.closeBoard();
+const cid  = wc.createComponent(b, { name: "Card" });   // → component id
+const copy = wc.instantiateComponent(cid, { x: 400, y: 0 }); // → copy root id
 await wc.commit();
 ```
 
