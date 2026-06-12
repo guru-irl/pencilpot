@@ -282,9 +282,9 @@ npm run test:mcp                      # MCP integration (penpot-hl must be up)
 The following were out of scope for Phase 1a and have since been addressed (MCP server)
 or remain deferred (1c):
 
-- **Text shapes** — `addText()` needs DOM-measured `position-data` (per-glyph
-  layout metrics) which requires a browser or headless Chromium. Not available in
-  the pure Node runtime.
+- **Text shapes** — `addText()` is implemented (Phase 1c-1). Text persists and is
+  schema-valid; precise per-glyph `position-data` is computed by the editor on open
+  (headless cannot measure font metrics). See the Phase 1b/1c README section.
 - **Flex / grid reflow** — `app.common.types.shape.layout` reflow calls are
   implemented in `app.common.*` but the integration into the headless session (auto
   layout propagation on commit) is deferred to Phase 1c.
@@ -314,7 +314,7 @@ See:
 | Tool | Description |
 |---|---|
 | `checkout` | Load a Penpot file into a headless working copy (`fileId` arg). Returns current `revn` and object count. |
-| `script` | Run a JS snippet against the working copy (`code` arg). Globals: `wc` (`addBoard`, `addRect`, `closeBoard`, `validate`, `pendingChanges`). Many edits in one call; no network until `commit`. |
+| `script` | Run a JS snippet against the working copy (`code` arg). Globals: `wc` (`addBoard`, `addRect`, `addText`, `closeBoard`, `validate`, `pendingChanges`). Many edits in one call; no network until `commit`. |
 | `scene` | Return the full working-copy object map (id → shape). |
 | `validate` | Run Penpot's own `validate-file-schema!` on the local state. Returns `[]` on success; error details otherwise. |
 | `status` | Pending (uncommitted) change count + current `revn`. |
@@ -341,9 +341,16 @@ wc.closeBoard();
 return wc.pendingChanges().length;   // → 2
 ```
 
-`addBoard()` returns the new board's UUID. Pass it as `parentId` to `addRect()` (or any
-other shape adder) to nest the shape inside the board. `closeBoard()` finalises the
-board's `objects` index. Nothing hits the network until `commit()`.
+`addBoard()` returns the new board's UUID. Pass it as `parentId` to `addRect()` or
+`addText()` to nest the shape inside the board. `closeBoard()` finalises the board's
+`objects` index. Nothing hits the network until `commit()`.
+
+`addText({x, y, width, height, characters, fontSize, fontId, fills, parentId, growType})`
+adds a text shape and returns its UUID. Multi-line text is supported via `"\n"` in
+`characters`. **Position-data caveat:** precise per-glyph layout (`position-data`) is
+computed by the Penpot editor when the file is opened — headless cannot measure font
+metrics — so text dimensions and line-wrapping settle when the file is next opened in the
+editor. The shape is schema-valid and persists correctly on `commit`.
 
 ### Environment variables
 
@@ -420,8 +427,13 @@ standalone integration/sanity script (cf. `mcp/packages/server/scripts/integrati
 
 The following remain out of scope and are targeted for Phase 1c:
 
-- **Text + flex/grid helpers** — `addText()` and auto-layout propagation require
-  browser-level metrics or a more involved reflow pass.
+- **Flex/grid auto-layout** — `app.common.types.shape.layout` reflow propagation on
+  commit requires a more involved reflow pass; deferred.
+- **Ellipses / paths / components** — not yet exposed via `wc`.
 - **`pp` CLI** — shell-friendly command-line interface wrapping `WorkingCopy` ops.
 - **Full Claude Code teaching skill** — a `/penpot-headless` skill that drives the
   MCP server with guided prompts for AI-assisted design automation.
+
+> **Phase 1c-1 (text) complete:** `addText()` is now implemented on `HeadlessSession`,
+> `WorkingCopy`, and the MCP `script` sandbox. Text shapes persist correctly;
+> see the position-data caveat above.
