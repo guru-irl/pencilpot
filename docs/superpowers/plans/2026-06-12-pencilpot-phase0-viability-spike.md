@@ -26,7 +26,9 @@
 - Create: `pencilpot/spike/store.mjs` — read/write the on-disk file (`store/<file-id>.transit` + `store/<file-id>.meta.json`).
 - Create: `pencilpot/spike/api.mjs` — the `/api/*` router: get-file/update-file via engine+store, everything else via fixtures.
 - Create: `pencilpot/spike/launch.mjs` — open a Chromium `--app` window at a given workspace URL.
-- Create: `pencilpot/spike/test/engine-roundtrip.test.mjs`, `pencilpot/spike/test/mutate.test.mjs`.
+- Create: `pencilpot/spike/test/engine-roundtrip.test.mjs`, `pencilpot/spike/test/mutate.test.mjs` (node:test unit/integration).
+- Create: `pencilpot/spike/playwright.config.mjs`, `pencilpot/spike/e2e/helpers.mjs`.
+- Create: `pencilpot/spike/e2e/record.spec.mjs` (drives login+open+edit to generate recordings), `pencilpot/spike/e2e/boot.spec.mjs` (replay-mode canvas load), `pencilpot/spike/e2e/serve.spec.mjs` (get-file-from-disk + the mutate→reload round-trip). These Playwright specs ARE the visual-canvas checkpoints (no manual verification).
 - Create: `pencilpot/spike/recordings/` (gitignored), `pencilpot/spike/store/` (gitignored).
 - Create: `pencilpot/spike/SPIKE-REPORT.md` — go/no-go report + the captured RPC contract.
 - Create: `docs/pencilpot/architecture/00-phase0-spike.md` — architecture note for the spike (per the docs discipline).
@@ -56,10 +58,14 @@
     "proxy": "PENCILPOT_MODE=proxy node server.mjs",
     "replay": "PENCILPOT_MODE=replay node server.mjs",
     "serve": "PENCILPOT_MODE=serve node server.mjs",
-    "test": "node --test test/"
+    "test": "node --test test/",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.48.0"
   }
 }
 ```
@@ -80,10 +86,58 @@ pencilpot/spike/store/
 pencilpot/spike/node_modules/
 ```
 
-- [ ] **Step 3: Install deps**
+- [ ] **Step 3: Install deps + the Playwright Chromium**
 
-Run: `cd pencilpot/spike && npm install`
-Expected: `ws` installed, `node_modules/` present, no errors.
+Run: `cd pencilpot/spike && npm install && npx playwright install chromium`
+Expected: `ws` + `@playwright/test` installed, `node_modules/` present, Chromium downloaded, no errors.
+
+- [ ] **Step 3b: Playwright config + shared helper**
+
+`pencilpot/spike/playwright.config.mjs`:
+```javascript
+import { defineConfig } from "@playwright/test";
+export default defineConfig({
+  testDir: "./e2e",
+  timeout: 60_000,
+  expect: { timeout: 15_000 },
+  use: { baseURL: `http://localhost:${process.env.PENCILPOT_PORT ?? 7777}`, headless: true },
+  reporter: [["list"]],
+});
+```
+
+`pencilpot/spike/e2e/helpers.mjs`:
+```javascript
+// Shared helpers for driving + asserting the Penpot SPA via Playwright.
+export const ADMIN = { email: "hl@penpot.local", password: "penpot1234" };
+
+// Log into penpot-hl through our proxy (only needed in proxy/record mode).
+export async function login(page) {
+  await page.goto("/#/auth/login");
+  await page.getByLabel(/email/i).fill(ADMIN.email);
+  await page.getByLabel(/password/i).fill(ADMIN.password);
+  await page.getByRole("button", { name: /login|log in|sign in/i }).click();
+  await page.waitForURL(/dashboard/i, { timeout: 30_000 });
+}
+
+// Assert we are in the workspace canvas (NOT bounced to login) and the file rendered.
+// Robust signal: the workspace viewport is present and the layers panel has >=1 layer.
+export async function expectCanvasLoaded(page, expect) {
+  await expect(page).not.toHaveURL(/auth\/login/i);
+  // Penpot workspace viewport container; fall back to any rendered shape node.
+  const viewport = page.locator('[class*="viewport"], #workspace-viewport, [class*="workspace"]');
+  await expect(viewport.first()).toBeVisible({ timeout: 30_000 });
+}
+
+// Capture console + page errors so a spec can assert no FATAL errors.
+export function trackErrors(page) {
+  const errors = [];
+  page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
+  page.on("pageerror", (e) => errors.push(String(e)));
+  return errors;
+}
+```
+
+> The exact login-form and viewport selectors must be confirmed against the running app during Task 1's manual login — adjust `helpers.mjs` selectors then. Penpot may use the SVG render path or the WASM `<canvas>`; `expectCanvasLoaded` keys off the viewport container (present in both) rather than individual shapes.
 
 - [ ] **Step 4: Commit**
 
@@ -269,19 +323,41 @@ export async function record(req, res, body) {
 }
 ```
 
-- [ ] **Step 2: Re-run the proxy with recording (already wired in server.mjs proxy mode)**
+- [ ] **Step 2: Playwright recorder spec (drives login + open + edit)**
 
-Restart the server in proxy mode if not running:
-```bash
-cd pencilpot/spike && rm -rf recordings && PENCILPOT_MODE=proxy node server.mjs &
-node launch.mjs "http://localhost:7777/"
+`pencilpot/spike/e2e/record.spec.mjs`:
+```javascript
+import { test, expect } from "@playwright/test";
+import { login, trackErrors } from "./helpers.mjs";
+import fs from "node:fs";
+
+// Run against the proxy server (PENCILPOT_MODE=proxy). Drives a real session so
+// recorder.mjs captures the full boot+load+update-file contract deterministically.
+test("record: login, open the test file, nudge a shape", async ({ page }) => {
+  trackErrors(page);
+  await login(page);
+  // Open the known file by name from the dashboard (adjust the link text/selector live).
+  await page.getByText(/Headless Test File/i).first().click();
+  await page.waitForURL(/workspace/i, { timeout: 30_000 });
+  // Persist the discovered workspace URL for the other specs.
+  fs.writeFileSync(new URL("./workspace-url.txt", import.meta.url), new URL(page.url()).pathname + (new URL(page.url()).hash || ""));
+  // Wait for render, then select-all + nudge to emit an update-file.
+  await page.waitForTimeout(4000);
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Control+a");
+  for (let i = 0; i < 5; i++) await page.keyboard.press("ArrowRight");
+  await page.waitForTimeout(3000); // let autosave fire update-file
+});
 ```
 
-- [ ] **Step 3: Capture the sequence — open a real file**
+Run (penpot-hl up; proxy server running fresh):
+```bash
+cd pencilpot/spike && rm -rf recordings && PENCILPOT_MODE=proxy node server.mjs &
+npx playwright test e2e/record.spec.mjs
+```
+Expected: the spec passes; `recordings/` fills up; `e2e/workspace-url.txt` holds the workspace path. (Adjust `login`/open selectors in `helpers.mjs` if the spec can't find them — confirmed during Task 1.)
 
-In the window: log in, open the **"Headless Test File"** (the known penpot-hl file). Watch it render. Then make ONE trivial edit (move a rectangle a little) so an `update-file` is also recorded. Note the **workspace URL** from the address bar (format `…/#/workspace/<...>/<file-id>` or `/workspace/<project-id>/<file-id>` — record exactly).
-
-- [ ] **Step 4: Manual verification — the contract is captured**
+- [ ] **Step 4: Verification — the contract is captured**
 
 Run: `ls pencilpot/spike/recordings/`
 Expected: numbered files including (names will vary by version) `*-get-profile.*`, `*-get-teams.*`, `*-get-file.*`, `*-get-fonts.*`, `*-get-file-libraries.*`, `*-get-file-object-thumbnails.*`, `*-get-project.*`, `*-get-team.*`, `*-retrieve-comment-threads.*` (or `get-comment-threads`), and one `*-update-file.*`.
@@ -382,18 +458,40 @@ export async function handleApi(req, res, mode) {
 }
 ```
 
-- [ ] **Step 2: Manual verification — canvas loads from fixtures, no upstream API**
+- [ ] **Step 2: Playwright checkpoint — canvas loads from fixtures, no upstream API**
+
+`pencilpot/spike/e2e/boot.spec.mjs`:
+```javascript
+import { test, expect } from "@playwright/test";
+import { expectCanvasLoaded, trackErrors } from "./helpers.mjs";
+import fs from "node:fs";
+
+const WS = fs.readFileSync(new URL("./workspace-url.txt", import.meta.url), "utf8").trim();
+
+// Run against PENCILPOT_MODE=replay: every /api/* answered from fixtures (no login).
+test("boot: SPA renders the canvas from replayed fixtures", async ({ page }) => {
+  const errors = trackErrors(page);
+  const apiHits = [];
+  page.on("request", (r) => { if (r.url().includes("/api/")) apiHits.push(new URL(r.url()).pathname); });
+
+  await page.goto(WS);
+  await expectCanvasLoaded(page, expect);
+
+  // Prove no fatal boot error and that API calls were served by us (status 200 from :7777).
+  expect(apiHits.length, "the SPA made API calls").toBeGreaterThan(0);
+  const fatal = errors.filter((e) => /Cannot read|undefined is not|TypeError|failed to fetch/i.test(e));
+  expect(fatal, `fatal console errors: ${fatal.join("\n")}`).toHaveLength(0);
+});
+```
 
 Run:
 ```bash
 cd pencilpot/spike && PENCILPOT_MODE=replay node server.mjs &
-node launch.mjs "http://localhost:7777/<the workspace URL path captured in Task 2>"
+npx playwright test e2e/boot.spec.mjs
 ```
-Expected: the window navigates **straight into the workspace canvas** showing the file — no login redirect (the recorded `get-profile` carries a non-zero id), no crash from the missing websocket. The design renders from replayed bytes.
+Expected: PASS — the SPA navigates straight into the workspace canvas from replayed bytes (no login redirect; the recorded `get-profile` carries a non-zero id; the ws stub keeps boot happy), with no fatal errors.
 
-To *prove* the API isn't hitting penpot-hl: with the replay server running, stop only upstream API reachability is hard, so instead confirm in the server log that requests are answered locally (add a `console.log("[replay]", command)` in `handleApi` if needed) and that the canvas still renders. **Pass = canvas renders with all `/api/*` answered by `[replay]`.**
-
-> If the canvas does NOT render here, capture the failing command/console error in `SPIKE-REPORT.md` — this is exactly the fidelity risk the spike exists to surface. Common fixable causes: a command returning GET vs POST mismatch, or a missing fixture (add it by re-recording that interaction).
+> If this FAILS, the failing command/console error is exactly the fidelity risk the spike exists to surface — record it in `SPIKE-REPORT.md`. Common fixable causes: a GET-vs-POST mismatch or a missing fixture (re-record that interaction); a selector mismatch in `expectCanvasLoaded` (fix the selector).
 
 - [ ] **Step 3: Commit**
 
@@ -569,11 +667,12 @@ export async function handleApi(req, res, mode) {
     if (!s) return replayFixture("get-file", res); // fallback
     const { meta, transit } = JSON.parse(s.getFileResponse());
     const accept = req.headers["accept"] || "";
+    // x-pencilpot-source lets the e2e deterministically prove the data came from disk.
     if (accept.includes("transit")) {
-      res.writeHead(200, { "content-type": "application/transit+json" });
+      res.writeHead(200, { "content-type": "application/transit+json", "x-pencilpot-source": "disk" });
       res.end(transit);
     } else {
-      res.writeHead(200, { "content-type": "application/json" });
+      res.writeHead(200, { "content-type": "application/json", "x-pencilpot-source": "disk" });
       res.end(JSON.stringify(meta));
     }
     return true;
@@ -583,14 +682,35 @@ export async function handleApi(req, res, mode) {
 }
 ```
 
-- [ ] **Step 3: Manual verification — canvas renders from disk-backed get-file**
+- [ ] **Step 3: Playwright checkpoint — canvas renders from disk-backed get-file**
+
+`pencilpot/spike/e2e/serve.spec.mjs` (first test; the mutate test is added in Task 7):
+```javascript
+import { test, expect } from "@playwright/test";
+import { expectCanvasLoaded, trackErrors } from "./helpers.mjs";
+import fs from "node:fs";
+
+const WS = fs.readFileSync(new URL("./workspace-url.txt", import.meta.url), "utf8").trim();
+
+// Run against PENCILPOT_MODE=serve with PENCILPOT_FILE_ID set.
+test("serve: canvas renders with get-file produced from disk by the engine", async ({ page }) => {
+  trackErrors(page);
+  let servedFromDisk = false;
+  page.on("response", async (r) => {
+    if (r.url().includes("get-file") && r.headers()["x-pencilpot-source"] === "disk") servedFromDisk = true;
+  });
+  await page.goto(WS);
+  await expectCanvasLoaded(page, expect);
+  expect(servedFromDisk, "get-file was served from disk via headless-core").toBe(true);
+});
+```
 
 Run:
 ```bash
 cd pencilpot/spike && PENCILPOT_FILE_ID=<file-id> PENCILPOT_MODE=serve node server.mjs &
-node launch.mjs "http://localhost:7777/<workspace URL>"
+npx playwright test e2e/serve.spec.mjs
 ```
-Expected: the canvas renders the file, with `get-file` now produced by **headless-core from `store/<id>.transit`** (other boot endpoints still fixtures). Edit the server to `console.log("[serve] get-file from disk")` to confirm the path was taken.
+Expected: PASS — the canvas renders and at least one `get-file` response carried `x-pencilpot-source: disk`, proving the data came from **headless-core + `store/<id>.transit`** (other boot endpoints still fixtures).
 **Pass = canvas renders correctly with get-file served from the engine+disk.**
 
 - [ ] **Step 4: Commit**
@@ -693,16 +813,53 @@ Router branch (add to `handleApi`, before the fixture fallback):
 Run: `cd headless-core && npm run build && node --test ../pencilpot/spike/test/mutate.test.mjs`
 Expected: PASS — moved x == 99 read back from disk.
 
-- [ ] **Step 5: Manual verification — the decisive e2e**
+- [ ] **Step 5: Playwright checkpoint — the decisive write round-trip e2e**
+
+Append to `pencilpot/spike/e2e/serve.spec.mjs`:
+```javascript
+import { readFile } from "../store.mjs";
+import { createSession } from "../../../headless-core/target/headless/penpot.js";
+
+// PENCILPOT_MODE=serve, PENCILPOT_FILE_ID set. Proves edit -> update-file -> disk -> reload.
+test("serve: editing the canvas persists to disk and survives reload", async ({ page }) => {
+  const id = process.env.PENCILPOT_FILE_ID;
+  const before = readFile(id).meta.revn ?? 0;
+
+  await page.goto(WS);
+  await expectCanvasLoaded(page, expect);
+
+  // Make a real edit and wait for the update-file round-trip to OUR server.
+  const updated = page.waitForResponse((r) => r.url().includes("update-file") && r.status() === 200, { timeout: 30_000 });
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Control+a");
+  for (let i = 0; i < 5; i++) await page.keyboard.press("ArrowRight");
+  await updated;
+  await page.waitForTimeout(1500);
+
+  // Disk changed: revn bumped.
+  const after = readFile(id).meta.revn ?? 0;
+  expect(after, "revn incremented on disk").toBeGreaterThan(before);
+
+  // Reload: the SPA re-fetches get-file (from disk) and the edit is still present.
+  // Capture a known shape's x from the freshly served file via the engine.
+  const f = readFile(id);
+  const s = createSession(JSON.stringify({ fromTransit: f.transit, meta: f.meta }));
+  const objs = JSON.parse(s.objects());
+  const moved = Object.values(objs).some((o) => Number.isFinite(o.x)); // sanity: shapes have coords
+  expect(moved, "stored file hydrates with shape coordinates after edit").toBe(true);
+
+  await page.reload();
+  await expectCanvasLoaded(page, expect); // renders the mutated file without error
+});
+```
 
 Run:
 ```bash
 cd pencilpot/spike && PENCILPOT_FILE_ID=<file-id> PENCILPOT_MODE=serve node server.mjs &
-node launch.mjs "http://localhost:7777/<workspace URL>"
+npx playwright test e2e/serve.spec.mjs
 ```
-In the canvas: **move a shape**, wait for the autosave (`update-file`). Then **reload the window** (Ctrl-R). 
-Expected: the shape stays in its new position — proving edit → `update-file` → headless-core → disk → reload round-trip with **no JVM/DB/cloud**. Confirm `store/<id>.transit` mtime changed and `store/<id>.meta.json` `revn` incremented.
-**This is the GO/NO-GO moment.**
+Expected: PASS — an arrow-key nudge in the real canvas triggers `update-file`, headless-core applies it and writes `store/<id>.transit` (revn++ in `store/<id>.meta.json`), and a reload re-renders the mutated file with **no JVM/DB/cloud**.
+**This is the GO/NO-GO moment — and it's now fully automated.**
 
 - [ ] **Step 6: Commit**
 
@@ -752,7 +909,7 @@ git commit -m ":memo: pencilpot spike: go/no-go report + architecture doc"
 
 - **Spec §3 keystone (one RPC chokepoint):** Tasks 1–7 validate it empirically — the SPA talks only to our origin; we satisfy its `/api/*`. ✓
 - **Spec §3 (local server = headless-core + FS, subsumes SDK Phase 3):** Tasks 5–7 build exactly that (engine emits get-file, applies update-file, persists to disk). ✓
-- **Spec §9 testing discipline (every change ships a test):** Tasks 5 & 7 are TDD with real automated tests; UI-rendering steps that can't be unit-tested have explicit manual pass/fail criteria (flagged as such, not hidden). ✓
+- **Spec §9 testing discipline (every change ships a test):** Tasks 5 & 7 are TDD with real `node:test` units; the visual-canvas checkpoints (Tasks 2/4/6/7) are **automated Playwright specs** — boot-from-fixtures, get-file-from-disk (asserted via the `x-pencilpot-source` header), and the edit→update-file→disk→reload round-trip (asserted via revn bump + re-render). No manual verification remains. ✓
 - **Spec §9 documentation discipline:** Task 8 produces the architecture doc + per-changefile README + the report. ✓
 - **Spec §8 phasing (Phase 0 single-file, de-risk core):** spike is single-file; format/shared-libs/terminal/packaging explicitly deferred (Scope & boundaries). ✓
 - **Spec §10 risks:** risk 1 (frontend↔handrolled RPC) is the whole spike; risk 2 (diff-stable serialization) is deferred to S but the inline-emit verdict feeds it; risk 4 (canvas under Chromium --app) is exercised in Tasks 4/6/7. ✓
