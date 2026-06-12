@@ -1,0 +1,12 @@
+# Local overrides promoting penpot-hl to the primary instance with our changes:
+# the upgraded MCP server image + the upgraded browser plugin (same as the retired :9001).
+services:
+  penpot-mcp:
+    image: penpot-mcp:local
+    environment:
+      PENPOT_MCP_TASK_TIMEOUT_SECS: "180"
+
+  penpot-frontend:
+    # serve our upgraded MCP browser plugin in place of the released one (read-only)
+    volumes:
+      - /home/guru/.local/share/penpot/mcp-plugin:/var/www/app/plugins/mcp:ro
