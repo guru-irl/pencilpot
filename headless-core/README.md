@@ -315,7 +315,7 @@ See:
 | Tool | Description |
 |---|---|
 | `checkout` | Load a Penpot file into a headless working copy (`fileId` arg). Returns current `revn` and object count. |
-| `script` | Run a JS snippet against the working copy (`code` arg). Globals: `wc` (`addBoard`, `addRect`, `addEllipse`, `addText`, `closeBoard`, `setFlexLayout`, `setGridLayout`, `setGrowType`, `setConstraints`, `validate`, `pendingChanges`). Many edits in one call; no network until `commit`. |
+| `script` | Run a JS snippet against the working copy (`code` arg). Globals: `wc` (`addBoard`, `addRect`, `addEllipse`, `addText`, `closeBoard`, `setFlexLayout`, `setGridLayout`, `setGrowType`, `setConstraints`, `addColorToken`, `tokens`, `validate`, `pendingChanges`). Many edits in one call; no network until `commit`. |
 | `scene` | Return the full working-copy object map (id → shape). |
 | `validate` | Run Penpot's own `validate-file-schema!` on the local state. Returns `[]` on success; error details otherwise. |
 | `status` | Pending (uncommitted) change count + current `revn`. |
@@ -432,6 +432,28 @@ const b = wc.addBoard({ x: 0, y: 0, width: 200, height: 200, name: "Card" });
 const r = wc.addRect({ x: 10, y: 10, width: 50, height: 50, parentId: b });
 wc.closeBoard();
 wc.setConstraints(r, { h: "right", v: "bottom" });  // pin to bottom-right corner
+await wc.commit();
+```
+
+### Design tokens
+
+`addColorToken({set, name, value})` adds a file-level color design token. It reuses
+Penpot's own token machinery (`app.common.types.tokens-lib` + the `set-token-set` /
+`set-token` / `set-token-theme` / `set-active-token-themes` change builders), mirroring
+the editor's first-token path: it creates the named set if it doesn't exist, adds the
+token, and wires up a hidden theme that enables the set so the token actually resolves.
+Tokens are file-level (not per-page) and persist through `commit`.
+
+- `set` — token set name (e.g. `"core"`); created on first use, reused thereafter.
+- `name` — token name; dots denote a path (e.g. `"color.primary"`).
+- `value` — plain hex string (e.g. `"#3366ff"`).
+
+`tokens()` reads the file's token lib back as `{ sets: [name...], tokens: [{name, value, type}...] }`.
+
+```js
+wc.addColorToken({ set: "core", name: "color.primary", value: "#3366ff" });
+wc.addColorToken({ set: "core", name: "color.bg",      value: "#ffffff" });
+wc.tokens();   // → { sets: ["core"], tokens: [{ name: "color.primary", value: "#3366ff", type: "color" }, ...] }
 await wc.commit();
 ```
 
