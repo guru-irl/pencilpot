@@ -8,14 +8,16 @@ const WS = fs.readFileSync(new URL("./workspace-url.txt", import.meta.url), "utf
 
 test("serve: canvas renders with get-file produced from disk by the engine", async ({ page }) => {
   trackErrors(page);
-  let servedFromDisk = false;
-  page.on("response", (r) => {
-    if (r.url().includes("get-file") && !r.url().includes("libraries") && !r.url().includes("thumbnail")
-        && r.headers()["x-pencilpot-source"] === "disk") servedFromDisk = true;
-  });
+  // Deterministic: await the disk-served get-file response (registered before navigation).
+  const diskGetFile = page.waitForResponse(
+    (r) => r.url().includes("get-file")
+        && !r.url().includes("libraries") && !r.url().includes("thumbnail")
+        && r.headers()["x-pencilpot-source"] === "disk",
+    { timeout: 30_000 }
+  );
   await page.goto(WS);
   await expectCanvasLoaded(page, expect);
-  expect(servedFromDisk, "get-file was served from disk via headless-core").toBe(true);
+  await diskGetFile; // throws if no disk-served get-file arrived
 });
 
 test("serve: editing the canvas persists to disk and survives reload", async ({ page }) => {
