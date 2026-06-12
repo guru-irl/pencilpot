@@ -326,19 +326,31 @@
                        :revn revn :vern vern :features (set features) :changes (:changes @state)}]
            (t/encode-str params)))
        :getFileResponse
-       ;; Returns JSON: { meta: {id, name, revn, vern, features}, transit: "<transit-string>" }
-       ;; The transit string is a get-file-shaped map with :data INLINE (no pointer fragments),
-       ;; ready for createSession({fromTransit, meta}) or the stock SPA's get-file consumer.
+       ;; Returns JSON: { meta: {id, name, revn, vern, features, ...}, transit: "<transit-string>" }
+       ;; If a full file envelope was captured on hydration (:file-envelope in state), the transit
+       ;; is the FULL get-file-shaped map (all SPA keys preserved) with :data refreshed from the
+       ;; engine.  Otherwise emits the minimal shape for round-trip/scratch usage.
+       ;; Ready for createSession({fromTransit, meta}) or the stock SPA's get-file consumer.
        (fn []
-         (let [data  (:data @state)
-               st    @state
-               meta-m {:id       (str file-id)
-                        :name     (get st :name "Pencilpot File")
-                        :revn     (get st :revn 0)
-                        :vern     (get st :vern 0)
-                        :features (vec features)}
-               resp  (assoc meta-m :data data)
-               body  (t/encode-str resp)]
+         (let [data     (:data @state)
+               st       @state
+               envelope (:file-envelope st)
+               revn     (get st :revn 0)
+               vern     (get st :vern 0)
+               nm       (get st :name "Pencilpot File")
+               meta-m   {:id       (str file-id)
+                         :name     nm
+                         :revn     revn
+                         :vern     vern
+                         :features (vec features)}
+               resp     (if envelope
+                          ;; Full round-trip: restore the original envelope + live :data
+                          (-> envelope
+                              (assoc :data data)
+                              (assoc :revn revn)
+                              (assoc :vern vern))
+                          (assoc meta-m :data data))
+               body     (t/encode-str resp)]
            (js/JSON.stringify (clj->js {:meta meta-m :transit body}))))})
 
 (defn ^:export create-session
@@ -347,9 +359,14 @@
    {fromTransit, meta} to re-hydrate from a getFileResponse() result."
   [args-json]
   (let [{:keys [empty dataTransit fileId features fromTransit meta name]} (args args-json)
-        ;; fromTransit path: decode a transit body produced by getFileResponse().
-        ;; The encoded map has :id :name :revn :vern :features :data inline.
+        ;; fromTransit path: decode a transit body (either a full get-file response or a
+        ;; getFileResponse()-emitted body).  Both have :data inline; a full get-file also
+        ;; carries :permissions/:team-id/:project-id/:version etc. — we keep the whole map
+        ;; as :file-envelope so getFileResponse can re-emit all SPA-required keys.
         decoded-ft (when fromTransit (t/decode-str fromTransit))
+        ;; Preserve the full envelope (everything except :data, which we manage live).
+        envelope   (when (and decoded-ft (:data decoded-ft))
+                     (dissoc decoded-ft :data))
         ;; Choose file-id: prefer meta.id > fileId > decoded > fresh
         file-id (cond
                   (and meta (:id meta)) (uuid/uuid (:id meta))
@@ -377,5 +394,6 @@
         nm      (or (when decoded-ft (:name decoded-ft)) (when meta (:name meta)) name "Pencilpot File")]
     (make-session (atom {:data data :page-id page-id :frame-id root-frame
                          :stack [root-frame] :changes []
-                         :revn revn :vern vern :name nm})
+                         :revn revn :vern vern :name nm
+                         :file-envelope envelope})
                   file-id (set feats))))
