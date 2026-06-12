@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "bin": { "pp": "bin/pp.mjs" },
   "scripts": {
     "build": "clojure -M:dev:shadow-cljs release headless",
     "watch": "clojure -M:dev:shadow-cljs watch headless",
@@ -12,6 +13,7 @@
     "verify": "npm run build && npm run test:unit && node --test test/script.test.mjs && npm run test:engine && npm run test:roundtrip && npm run test:mcp",
     "mcp": "node mcp/server.mjs",
     "test:mcp": "node --test test/mcp-server.test.mjs",
+    "test:cli": "node --test test/cli.test.mjs",
     "sanity": "node scripts/sanity.mjs"
   },
   "dependencies": {
