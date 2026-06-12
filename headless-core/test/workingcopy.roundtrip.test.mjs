@@ -58,3 +58,18 @@ test("WorkingCopy: flex layout arranges + persists", async () => {
   const xs = ids.map(id => objs[id].selrect.x).sort((a,bb)=>a-bb);
   assert.ok(xs[1]-xs[0] >= 80 && xs[2]-xs[1] >= 80, `children spread persisted (got ${xs})`);
 });
+
+test("WorkingCopy: grid layout arranges + persists", async () => {
+  const wc = await new WorkingCopy(env.fileId, env.token).checkout();
+  const b = wc.addBoard({ x: 1700, y: 60, width: 400, height: 400, name: "Grid Board" });
+  const ids = [0,1,2,3].map(() => wc.addRect({ x: 0, y: 0, width: 80, height: 60, parentId: b }));
+  wc.closeBoard();
+  wc.setGridLayout(b, { cols: 2, gap: 10 });
+  assert.deepEqual(wc.validate(), []);
+  await wc.commit();
+  const after = await getFile(env.fileId, env.token);
+  const objs = after.raw.data.pagesIndex[after.pageId].objects;
+  assert.equal(objs[b].layout, "grid", "board persisted as grid container");
+  const xs = new Set(ids.map(id => Math.round(objs[id].selrect.x)));
+  assert.equal(xs.size, 2, `2 columns persisted (xs=${[...xs]})`);
+});
