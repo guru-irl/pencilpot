@@ -28,6 +28,7 @@ export class WorkingCopy {
   addColorToken(opts) { return this.session.addColorToken(JSON.stringify(opts)); }
   tokens() { return JSON.parse(this.session.tokens()); }
 
+  getFileResponse() { return JSON.parse(this.session.getFileResponse()); }
   validate() { return JSON.parse(this.session.validate()); }
   pendingChanges() { return JSON.parse(this.session.pendingChanges()); }
 

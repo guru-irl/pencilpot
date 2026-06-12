@@ -324,24 +324,58 @@
          (let [{:keys [sessionId revn vern]} (args json)
                params {:id file-id :session-id (uuid/parse sessionId)
                        :revn revn :vern vern :features (set features) :changes (:changes @state)}]
-           (t/encode-str params)))})
+           (t/encode-str params)))
+       :getFileResponse
+       ;; Returns JSON: { meta: {id, name, revn, vern, features}, transit: "<transit-string>" }
+       ;; The transit string is a get-file-shaped map with :data INLINE (no pointer fragments),
+       ;; ready for createSession({fromTransit, meta}) or the stock SPA's get-file consumer.
+       (fn []
+         (let [data  (:data @state)
+               st    @state
+               meta-m {:id       (str file-id)
+                        :name     (get st :name "Pencilpot File")
+                        :revn     (get st :revn 0)
+                        :vern     (get st :vern 0)
+                        :features (vec features)}
+               resp  (assoc meta-m :data data)
+               body  (t/encode-str resp)]
+           (js/JSON.stringify (clj->js {:meta meta-m :transit body}))))})
 
 (defn ^:export create-session
-  "args-json: either {empty:true,name} for a fresh file, or
-   {dataTransit, fileId, features} hydrated from get-file (transit)."
+  "args-json: either {empty:true,name} for a fresh file,
+   {dataTransit, fileId, features} hydrated from get-file (transit), or
+   {fromTransit, meta} to re-hydrate from a getFileResponse() result."
   [args-json]
-  (let [{:keys [empty dataTransit fileId features]} (args args-json)
-        file-id (if fileId (uuid/uuid fileId) (uuid/next))
+  (let [{:keys [empty dataTransit fileId features fromTransit meta name]} (args args-json)
+        ;; fromTransit path: decode a transit body produced by getFileResponse().
+        ;; The encoded map has :id :name :revn :vern :features :data inline.
+        decoded-ft (when fromTransit (t/decode-str fromTransit))
+        ;; Choose file-id: prefer meta.id > fileId > decoded > fresh
+        file-id (cond
+                  (and meta (:id meta)) (uuid/uuid (:id meta))
+                  fileId                (uuid/uuid fileId)
+                  decoded-ft            (or (:id decoded-ft) (uuid/next))
+                  :else                 (uuid/next))
         ;; get-file transit decodes to a FULL FILE map (keys: :id :data :revn
         ;; :vern :features ...), so unwrap :data; tolerate a bare data value too.
-        decoded (when-not empty (t/decode-str dataTransit))
-        data    (if empty (empty-data) (or (:data decoded) decoded))
+        decoded (when (and (not empty) (not fromTransit)) (when dataTransit (t/decode-str dataTransit)))
+        data    (cond
+                  empty       (empty-data)
+                  fromTransit (or (:data decoded-ft) decoded-ft)
+                  :else       (or (:data decoded) decoded))
         _       (when-not empty
                   (when-not (:pages data)
                     (throw (ex-info "create-session: decoded file has no :pages (bad hydrate payload)" {}))))
         page-id (or (page-id-of data) (first (:pages data)))
-        feats   (or features ["components/v2" "fdata/shape-data-type" "fdata/path-data"
-                              "styles/v2" "layout/grid" "plugins/runtime"])]
+        feats   (or features
+                    (when decoded-ft (:features decoded-ft))
+                    ["components/v2" "fdata/shape-data-type" "fdata/path-data"
+                     "styles/v2" "layout/grid" "plugins/runtime"])
+        ;; Carry revn/vern/name from decoded-ft or meta for getFileResponse round-trips
+        revn    (or (when decoded-ft (:revn decoded-ft)) (when meta (:revn meta)) 0)
+        vern    (or (when decoded-ft (:vern decoded-ft)) (when meta (:vern meta)) 0)
+        nm      (or (when decoded-ft (:name decoded-ft)) (when meta (:name meta)) name "Pencilpot File")]
     (make-session (atom {:data data :page-id page-id :frame-id root-frame
-                         :stack [root-frame] :changes []})
+                         :stack [root-frame] :changes []
+                         :revn revn :vern vern :name nm})
                   file-id (set feats))))
