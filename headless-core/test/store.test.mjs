@@ -20,3 +20,35 @@ test("canonical EDN is deterministic (serialize twice -> byte-identical)", () =>
   s.closeBoard();
   assert.equal(s.serializeStore(), s.serializeStore(), "two serializations byte-identical");
 });
+
+test("serializeStore -> loadStore preserves design tokens (tokens-lib)", () => {
+  // Create a session with a color token.
+  const s = createSession(JSON.stringify({ empty: true }));
+  s.addColorToken(JSON.stringify({ name: "brand.primary", value: "#ff0000" }));
+
+  // The manifest EDN must contain the #penpot/tokens-lib tagged literal.
+  const parts1 = JSON.parse(s.serializeStore());
+  assert.ok(
+    parts1.manifest.includes("#penpot/tokens-lib"),
+    "manifest EDN contains #penpot/tokens-lib tagged literal"
+  );
+
+  // Round-trip: load from the serialized store.
+  const s2 = createSession(JSON.stringify({ fromStore: parts1 }));
+
+  // Re-serializing must produce byte-identical output — proves full reconstruction,
+  // not data-dropping.
+  assert.equal(
+    s2.serializeStore(),
+    s.serializeStore(),
+    "tokens-lib round-trips losslessly (byte-identical re-serialization)"
+  );
+
+  // The token must be accessible after the round-trip.
+  const tokensData = JSON.parse(s2.tokens());
+  const tokenNames = (tokensData.tokens || []).map((t) => t.name);
+  assert.ok(
+    tokenNames.includes("brand.primary"),
+    `token 'brand.primary' present after round-trip; found: ${JSON.stringify(tokenNames)}`
+  );
+});

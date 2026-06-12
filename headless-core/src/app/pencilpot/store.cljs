@@ -1,13 +1,15 @@
 (ns app.pencilpot.store
   "Canonical-EDN serializer/deserializer for the pencilpot on-disk store.
 
-  Lossless: keywords, #uuid literals and sets all survive the round-trip.
+  Lossless: keywords, #uuid literals, sets, and Penpot record types (e.g.
+  TokensLib) all survive the round-trip.
   Deterministic: sorted-map-by print-representation ensures byte-identical
   output when data is unchanged, keeping git diffs minimal."
   (:require
    [cljs.reader :as reader]
    [clojure.pprint :as pp]
-   [app.common.uuid :as uuid]))
+   [app.common.uuid :as uuid]
+   [app.common.types.tokens-lib :as ctob]))
 
 ;; ---------------------------------------------------------------------------
 ;; Canonical ordering helpers
@@ -39,11 +41,27 @@
             cljs.core/*print-namespace-maps*  false]
     (with-out-str (pp/pprint (canon data)))))
 
+(defn- edn-read-tokens-lib
+  "EDN tag reader for #penpot/tokens-lib.
+
+  The tagged value is the DTCG-JSON map produced by `export-dtcg-json`
+  (string-keyed DTCG structure), or nil when the library is empty
+  (`export-dtcg-json` returns nil for an empty TokensLib).
+
+  Uses Penpot's own `parse-multi-set-dtcg-json` to reconstruct the record
+  with full fidelity — no hand-rolled reconstruction."
+  [v]
+  (when (some? v)
+    (ctob/parse-multi-set-dtcg-json v)))
+
 (defn read-edn
   "Parse an EDN string produced by `canonical-edn`.  Supports the #uuid
-  tagged literal using `app.common.uuid/uuid`."
+  tagged literal and all Penpot tagged literals that appear in file :data
+  (currently #penpot/tokens-lib)."
   [s]
-  (reader/read-string {:readers {'uuid uuid/uuid}} s))
+  (reader/read-string {:readers {'uuid              uuid/uuid
+                                 'penpot/tokens-lib edn-read-tokens-lib}}
+                      s))
 
 ;; ---------------------------------------------------------------------------
 ;; Public API
