@@ -10,6 +10,7 @@
    [app.common.geom.shapes :as gsh]              ; transform-shape (apply modifiers)
    [app.common.files.validate :as cfv]           ; validate-file-schema! (parity oracle)
    [app.common.types.file :as ctf]               ; make-file-data
+   [app.common.types.tokens-lib :as ctob]        ; design tokens (sets/tokens/themes)
    [app.common.transit :as t]                    ; decode-str / encode-str (wire + record handlers)
    [app.common.uuid :as uuid]
    [app.common.geom.matrix]                       ; side-effect: transit handler
@@ -219,6 +220,44 @@
                                                          h (assoc :constraints-h (keyword h))
                                                          v (assoc :constraints-v (keyword v))))))]
            (apply-changes! state ch) js/undefined))
+       :addColorToken
+       (fn [json]
+         ;; FILE-level design tokens. Mirrors frontend create-token-with-set
+         ;; (library_edit.cljs:491-519): set-token-set + set-token + a hidden
+         ;; theme that enables the set + activate that hidden theme, so the
+         ;; token actually resolves. Builders are library-level: needs
+         ;; (pcb/with-library-data data), NOT with-page-id/with-objects.
+         (let [{:keys [set name value]} (args json)
+               set-name (or set "Global")
+               data     (:data @state)
+               ;; reuse an existing set by name if present, else make a new one
+               lib      (:tokens-lib data)
+               existing (some-> lib (ctob/get-set-by-name set-name))
+               token-set (or existing (ctob/make-token-set :name set-name))
+               set-id    (ctob/get-id token-set)
+               token     (ctob/make-token :name name :type :color :value value)
+               hidden    (ctob/make-hidden-theme)
+               hidden+   (ctob/enable-set hidden set-name)
+               changes   (-> (pcb/empty-changes nil)
+                             (pcb/with-library-data data)
+                             (pcb/set-token-set set-id token-set)
+                             (pcb/set-token set-id (:id token) token)
+                             (pcb/set-token-theme (ctob/get-id hidden) hidden+)
+                             (pcb/set-active-token-themes #{ctob/hidden-theme-path}))]
+           (apply-changes! state changes)
+           (str (:id token))))
+       :tokens
+       (fn []
+         ;; Read the file-level TokensLib back into a JSON summary.
+         (let [lib (:tokens-lib (:data @state))]
+           (if (nil? lib)
+             (js/JSON.stringify #js {:sets #js [] :tokens #js []})
+             (let [set-names (vec (ctob/get-set-names lib))
+                   tokens    (->> (ctob/get-all-tokens lib)
+                                  (mapv (fn [t] {:name  (:name t)
+                                                 :value (:value t)
+                                                 :type  (clojure.core/name (:type t))})))]
+               (js/JSON.stringify (->plain-js {:sets set-names :tokens tokens}))))))
        :objects  (fn [] (js/JSON.stringify (->plain-js (get-in (:data @state) [:pages-index (:page-id @state) :objects]))))
        :getShape (fn [id] (js/JSON.stringify (->plain-js (get-in (:data @state) [:pages-index (:page-id @state) :objects (uuid/uuid id)]))))
        :validate (fn []

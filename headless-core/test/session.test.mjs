@@ -113,6 +113,15 @@ test("setGrowType changes a text shape's grow-type", () => {
   assert.deepEqual(JSON.parse(s.validate()), []);
 });
 
+test("addColorToken creates a token set + color token", () => {
+  const s = createSession(JSON.stringify({ empty: true }));
+  s.addColorToken(JSON.stringify({ set: "core", name: "color.primary", value: "#3366ff" }));
+  const toks = JSON.parse(s.tokens());          // accessor returning the lib summary
+  assert.ok(toks.sets.includes("core"), `sets=${JSON.stringify(toks.sets)}`);
+  assert.ok(toks.tokens.some(t => t.name === "color.primary" && t.value === "#3366ff"), `tokens=${JSON.stringify(toks.tokens)}`);
+  assert.deepEqual(JSON.parse(s.validate()), []);
+});
+
 test("setConstraints sets horizontal + vertical constraints", () => {
   const s = createSession(JSON.stringify({ empty: true }));
   const b = s.addBoard(JSON.stringify({ x: 0, y: 0, width: 200, height: 200 }));

@@ -88,6 +88,32 @@ test("WorkingCopy: constraints persist", async () => {
   assert.equal(o.constraintsH ?? o["constraints-h"], "right");
 });
 
+test("WorkingCopy: color token persists", async () => {
+  const wc = await new WorkingCopy(env.fileId, env.token).checkout();
+  const name = "color.test" + Date.now();
+  const tokenId = wc.addColorToken({ set: "core", name, value: "#abcdef" });
+  assert.deepEqual(wc.validate(), []);
+  await wc.commit();
+  const after = await getFile(env.fileId, env.token);
+  // The server serializes the tokens lib as DTCG JSON, where a dotted token
+  // name like "color.test123" becomes a nested path {core:{color:{test123:{...}}}}.
+  // Assert the set + the (split) token name + value all persisted.
+  const lib = after.raw.data.tokensLib ?? after.raw.data["tokens-lib"] ?? {};
+  const serialized = JSON.stringify(lib);
+  assert.ok(lib.core, `set "core" persisted; lib=${serialized}`);
+  const leaf = name.split(".").pop(); // e.g. "test123..."
+  assert.match(serialized, new RegExp(`"${leaf}"`), `token name persisted; lib=${serialized}`);
+  assert.match(serialized, /#abcdef/, `token value persisted; lib=${serialized}`);
+
+  // Re-checkout and read the lib back through the session accessor.
+  const wc2 = await new WorkingCopy(env.fileId, env.token).checkout();
+  const toks = wc2.tokens();
+  assert.ok(toks.sets.includes("core"), `tokens() sets=${JSON.stringify(toks.sets)}`);
+  assert.ok(toks.tokens.some((t) => t.name === name && t.value === "#abcdef"),
+    `tokens() round-trips token; tokens=${JSON.stringify(toks.tokens)}`);
+  assert.equal(typeof tokenId, "string");
+});
+
 test("WorkingCopy: add ellipse persists as circle", async () => {
   const before = await getFile(env.fileId, env.token);
   const beforeCount = Object.keys(before.raw.data.pagesIndex[before.pageId].objects).length;
