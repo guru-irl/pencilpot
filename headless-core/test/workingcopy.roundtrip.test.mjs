@@ -42,3 +42,19 @@ test("WorkingCopy: add text persists with content", async () => {
   const t = Object.values(after.raw.data.pagesIndex[after.pageId].objects).find((s) => s.id === id);
   assert.ok(t && t.type === "text", "persisted shape is text");
 });
+
+test("WorkingCopy: flex layout arranges + persists", async () => {
+  const wc = await new WorkingCopy(env.fileId, env.token).checkout();
+  const b = wc.addBoard({ x: 1200, y: 60, width: 400, height: 120, name: "Flex Row" });
+  const ids = [0,1,2].map(() => wc.addRect({ x: 0, y: 0, width: 80, height: 60, parentId: b }));
+  wc.closeBoard();
+  wc.setFlexLayout(b, { dir: "row", gap: 10 });
+  assert.deepEqual(wc.validate(), []);
+  await wc.commit();
+  const after = await getFile(env.fileId, env.token);
+  const objs = after.raw.data.pagesIndex[after.pageId].objects;
+  assert.equal(objs[b].layout, "flex", "board persisted as flex container");
+  // children arranged left-to-right (persisted reflow)
+  const xs = ids.map(id => objs[id].selrect.x).sort((a,bb)=>a-bb);
+  assert.ok(xs[1]-xs[0] >= 80 && xs[2]-xs[1] >= 80, `children spread persisted (got ${xs})`);
+});
