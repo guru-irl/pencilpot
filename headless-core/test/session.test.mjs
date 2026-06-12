@@ -148,6 +148,21 @@ test("createComponent promotes a board to a main component", () => {
   assert.deepEqual(JSON.parse(s.validate()), []);
 });
 
+test("getShape returns a single shape by id; objects returns the full map", () => {
+  const s = createSession(JSON.stringify({ empty: true }));
+  const b = s.addBoard(JSON.stringify({ x: 0, y: 0, width: 200, height: 120, name: "Host" }));
+  const r = s.addRect(JSON.stringify({ x: 10, y: 10, width: 50, height: 50, parentId: b, name: "Pin" }));
+  s.closeBoard();
+
+  const objs = JSON.parse(s.objects());
+  assert.ok(objs[b] && objs[r], "objects() returns the full id->shape map");
+
+  const shape = JSON.parse(s.getShape(r));
+  assert.equal(shape.type, "rect", "getShape returns the requested shape");
+  assert.equal(shape.name, "Pin");
+  assert.equal(shape.selrect.width, 50);
+});
+
 test("instantiateComponent creates a copy of a component", () => {
   const s = createSession(JSON.stringify({ empty: true }));
   const b = s.addBoard(JSON.stringify({ x: 0, y: 0, width: 200, height: 120, name: "Card" }));

@@ -7,13 +7,14 @@
   "scripts": {
     "build": "clojure -M:dev:shadow-cljs release headless",
     "watch": "clojure -M:dev:shadow-cljs watch headless",
-    "test:unit": "node --test test/session.test.mjs test/facade.test.mjs",
+    "test": "node scripts/run-tests.mjs",
+    "test:unit": "node --test test/session.test.mjs test/facade.test.mjs test/script.test.mjs",
+    "test:integration": "node --test --test-concurrency=1 test/workingcopy.roundtrip.test.mjs test/roundtrip.test.mjs",
+    "test:e2e": "node --test --test-concurrency=1 test/mcp-server.test.mjs test/cli.test.mjs",
+    "test:live": "node scripts/run-tests.mjs --live",
     "test:engine": "node scripts/test-engine.mjs",
-    "test:roundtrip": "node --test test/workingcopy.roundtrip.test.mjs",
-    "verify": "npm run build && npm run test:unit && node --test test/script.test.mjs && npm run test:engine && npm run test:roundtrip && npm run test:mcp && npm run test:cli",
+    "verify": "node scripts/run-tests.mjs",
     "mcp": "node mcp/server.mjs",
-    "test:mcp": "node --test test/mcp-server.test.mjs",
-    "test:cli": "node --test test/cli.test.mjs",
     "sanity": "node scripts/sanity.mjs"
   },
   "dependencies": {

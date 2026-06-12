@@ -38,3 +38,25 @@ test("MCP: checkout -> script(add board+rect) -> validate -> commit persists", a
   assert.equal(c.committed, true);
   assert.ok(typeof c.revn === "number");
 });
+
+test("MCP: status reports pending count + revn; discard resets the working copy", async () => {
+  const client = await connected();
+  await client.callTool({ name: "checkout", arguments: { fileId: env.fileId } });
+
+  // before any edit: zero pending, numeric revn
+  const before = parse(await client.callTool({ name: "status", arguments: {} }));
+  assert.equal(before.pending, 0);
+  assert.ok(typeof before.revn === "number");
+
+  // edit (no commit) -> status reflects pending changes
+  parse(await client.callTool({ name: "script", arguments: { code:
+    "wc.addBoard({x:100,y:100,width:120,height:80,name:'Status Probe'}); wc.closeBoard(); return wc.pendingChanges().length;" } }));
+  const after = parse(await client.callTool({ name: "status", arguments: {} }));
+  assert.equal(after.pending, 1, "pending change counted");
+
+  // discard drops the working copy; subsequent tool calls must error until re-checkout
+  const d = parse(await client.callTool({ name: "discard", arguments: {} }));
+  assert.equal(d.discarded, true);
+  const errRes = await client.callTool({ name: "status", arguments: {} });
+  assert.match(errRes.content[0].text, /No file checked out/i, "discard cleared the working copy");
+});
