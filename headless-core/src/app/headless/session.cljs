@@ -3,6 +3,10 @@
    [app.common.types.shape :as cts]              ; setup-shape (geometry)
    [app.common.types.text :as txt]               ; change-text (text content + styles)
    [app.common.files.changes :as cfc]            ; process-changes (apply to file-data)
+   [app.common.files.changes-builder :as pcb]    ; update-shapes -> :mod-obj diffs
+   [app.common.geom.modifiers :as gm]            ; set-objects-modifiers (layout engine)
+   [app.common.types.modifiers :as ctm]          ; reflow-modifiers (seed)
+   [app.common.geom.shapes :as gsh]              ; transform-shape (apply modifiers)
    [app.common.files.validate :as cfv]           ; validate-file-schema! (parity oracle)
    [app.common.types.file :as ctf]               ; make-file-data
    [app.common.transit :as t]                    ; decode-str / encode-str (wire + record handlers)
@@ -62,6 +66,26 @@
        (seq valid-fills)   (assoc :fills valid-fills)
        (seq valid-strokes) (assoc :strokes valid-strokes)))))
 
+;; --- flex auto-layout ------------------------------------------------------
+;; Default flex layout attrs (mirrors frontend shape_layout.cljs initial-flex-layout).
+(def ^:private initial-flex-layout
+  {:layout :flex :layout-flex-dir :row :layout-gap-type :multiple
+   :layout-gap {:row-gap 0 :column-gap 0} :layout-align-items :start
+   :layout-justify-content :start :layout-align-content :stretch
+   :layout-wrap-type :nowrap :layout-padding-type :simple
+   :layout-padding {:p1 0 :p2 0 :p3 0 :p4 0}})
+
+(defn- objects-of [state]
+  (get-in (:data @state) [:pages-index (:page-id @state) :objects]))
+
+;; Apply a pcb/* changes map's :redo-changes to the working copy + record them.
+(defn- apply-changes! [state changes]
+  (let [redo (:redo-changes changes)]
+    (swap! state #(-> %
+                      (update :data cfc/process-changes redo false)
+                      (update :changes into redo)))
+    redo))
+
 ;; --- the JS-facing session object ------------------------------------------
 (defn- make-session [state file-id features]
   #js {:addBoard
@@ -97,6 +121,37 @@
                          (update :content txt/change-text (or characters "") styles)
                          (dissoc :position-data))]
            (add-shape! state shape)))
+       :setFlexLayout
+       (fn [board-id opts-json]
+         (let [{:keys [dir gap padding align justify wrap]} (args opts-json)
+               bid  (uuid/parse board-id)
+               pid  (:page-id @state)
+               flex (cond-> initial-flex-layout
+                      dir             (assoc :layout-flex-dir (keyword dir))
+                      align           (assoc :layout-align-items (keyword align))
+                      justify         (assoc :layout-justify-content (keyword justify))
+                      wrap            (assoc :layout-wrap-type (keyword wrap))
+                      (some? gap)     (assoc :layout-gap {:row-gap gap :column-gap gap})
+                      (some? padding) (assoc :layout-padding {:p1 padding :p2 padding :p3 padding :p4 padding}))
+               ;; (A) set the flex layout attrs on the board
+               objs1 (objects-of state)
+               ch1   (-> (pcb/empty-changes nil pid)
+                         (pcb/with-page-id pid)
+                         (pcb/with-objects objs1)
+                         (pcb/update-shapes [bid] (fn [s] (merge s flex))))
+               _     (apply-changes! state ch1)
+               ;; (B) reflow children via Penpot's own modifier engine
+               objs2 (objects-of state)
+               tree  {bid {:modifiers (ctm/reflow-modifiers)}}
+               res   (gm/set-objects-modifiers tree objs2)
+               ids   (vec (keys res))
+               ch2   (-> (pcb/empty-changes nil pid)
+                         (pcb/with-page-id pid)
+                         (pcb/with-objects objs2)
+                         (pcb/update-shapes ids
+                                            (fn [s] (gsh/transform-shape s (get-in res [(:id s) :modifiers])))))
+               _     (apply-changes! state ch2)]
+           (js/JSON.stringify #js {:reflowed (count ids)})))
        :objects  (fn [] (js/JSON.stringify (->plain-js (get-in (:data @state) [:pages-index (:page-id @state) :objects]))))
        :getShape (fn [id] (js/JSON.stringify (->plain-js (get-in (:data @state) [:pages-index (:page-id @state) :objects (uuid/uuid id)]))))
        :validate (fn []

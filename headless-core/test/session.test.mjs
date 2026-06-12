@@ -64,3 +64,17 @@ test("clearChanges resets recorded changes (no double-commit)", () => {
   s.addRect(JSON.stringify({ x: 10, y: 10, width: 20, height: 20 }));
   assert.equal(JSON.parse(s.pendingChanges()).length, 1, "only the new change is pending");
 });
+
+test("setFlexLayout arranges children in a row", () => {
+  const s = createSession(JSON.stringify({ empty: true }));
+  const b = s.addBoard(JSON.stringify({ x: 0, y: 0, width: 400, height: 120, name: "Row" }));
+  const ids = [0,1,2].map(() => s.addRect(JSON.stringify({ x: 0, y: 0, width: 80, height: 60, parentId: b })));
+  s.closeBoard();
+  const out = JSON.parse(s.setFlexLayout(b, JSON.stringify({ dir: "row", gap: 10, padding: 0 })));
+  assert.ok(out.reflowed >= 3, "container + children reflowed");
+  const objs = JSON.parse(s.objects());
+  assert.equal(objs[b].layout, "flex");
+  const xs = ids.map(id => objs[id].selrect.x).sort((a,bb)=>a-bb);
+  assert.ok(xs[1]-xs[0] >= 80 && xs[2]-xs[1] >= 80, `children spread by >=80 (got ${xs})`);
+  assert.deepEqual(JSON.parse(s.validate()), []);
+});
