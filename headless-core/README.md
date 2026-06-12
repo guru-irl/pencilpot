@@ -239,14 +239,16 @@ cd headless-core
 npm run verify
 ```
 
-This runs four layers in sequence; any failure stops the chain:
+This runs six layers in sequence; any failure stops the chain:
 
 | Script | What it checks |
 |---|---|
 | `npm run build` | shadow-cljs compiles `src/app/headless/core.cljs` (+ all `app.common.*` deps) to `target/headless/penpot.js` with 0 warnings. |
 | `npm run test:unit` | Node built-in test runner executes `test/session.test.mjs` and `test/facade.test.mjs`. Covers the `HeadlessSession` state machine (setup-shape + process-changes in-process) and the `buildAddBoardChange` / `buildAddBoardBody` facade exports. No network required. |
+| `node --test test/script.test.mjs` | Unit tests for the `runScript` sandbox (`sdk/script.mjs`): return values, console capture, error surfacing, and top-level `await`. No network required. |
 | `npm run test:engine` | `scripts/test-engine.mjs` loads Penpot's own `cljs.test`-compiled common suites via the built bundle and runs every `deftest` in `common-tests.geom.*`, `common-tests.types.*`, and `common-tests.files.*`. These are Penpot's upstream unit tests — ~14 000+ assertions — running against the exact compiled code the headless SDK uses. A failure here means a Penpot-engine regression, not an SDK bug. No network required. |
 | `npm run test:roundtrip` | `test/workingcopy.roundtrip.test.mjs` hits the live `penpot-hl` instance (port 9101). It calls `checkout`, adds a board and a rect, calls `validate`, calls `commit`, then re-fetches the file and asserts both shapes persist with correct geometry. Reads credentials from `infra/penpot-hl/test-env.json`. |
+| `npm run test:mcp` | `test/mcp-server.test.mjs` spins up the MCP server with an in-memory transport, verifies all 7 tools are registered, and runs a full `checkout → script → validate → commit` round-trip against `penpot-hl`. 2 tests, 2 pass. |
 
 ### Running `penpot-hl`
 
@@ -265,35 +267,132 @@ node test/setup-env.mjs
 ### Individual layers
 
 ```bash
-npm run build          # compile only
-npm run test:unit      # unit (no network)
-npm run test:engine    # engine parity gate (no network)
-npm run test:roundtrip # live round-trip (penpot-hl must be up)
+npm run build                         # compile only
+npm run test:unit                     # unit (no network)
+node --test test/script.test.mjs      # script sandbox unit (no network)
+npm run test:engine                   # engine parity gate (no network)
+npm run test:roundtrip                # live round-trip (penpot-hl must be up)
+npm run test:mcp                      # MCP integration (penpot-hl must be up)
 ```
 
 ---
 
-## What's next (Phase 1b deferrals)
+## What's next (Phase 1b deferrals — original)
 
-The following are deliberately out of scope for Phase 1a:
+The following were out of scope for Phase 1a and have since been addressed (MCP server)
+or remain deferred (1c):
 
 - **Text shapes** — `addText()` needs DOM-measured `position-data` (per-glyph
   layout metrics) which requires a browser or headless Chromium. Not available in
   the pure Node runtime.
 - **Flex / grid reflow** — `app.common.types.shape.layout` reflow calls are
   implemented in `app.common.*` but the integration into the headless session (auto
-  layout propagation on commit) is deferred.
-- **`script(js)` sandbox** — user-supplied JS snippets evaluated inside the
-  working-copy session.
+  layout propagation on commit) is deferred to Phase 1c.
 - **`pp` CLI** — a command-line interface that drives `WorkingCopy` ops from shell
-  scripts and CI pipelines.
-- **MCP server** — exposes headless ops as MCP tools consumable by Claude Code.
+  scripts and CI pipelines. Deferred to Phase 1c.
 - **Claude Code skill** — a `/penpot-headless` skill that drives the MCP server for
-  AI-assisted design automation.
+  AI-assisted design automation. Deferred to Phase 1c.
 - **Golden dump-file snapshots** — deterministic `get-file` response fixtures for
-  offline regression testing, eliminating the `penpot-hl` dependency from
-  `test:roundtrip`.
+  offline regression testing. Deferred to Phase 1c.
 
 See:
 - `docs/superpowers/specs/2026-06-11-penpot-headless-sdk-design.md`
 - `docs/superpowers/plans/2026-06-11-penpot-headless-sdk-phase0.md`
+
+---
+
+## Phase 1b — Headless MCP Server
+
+> **Status: Phase 1b complete.**  The MCP server is live and registered with Claude Code.
+> Six verify layers all pass: build → test:unit → script sandbox → engine gate →
+> roundtrip → MCP integration.
+
+---
+
+### The 7 MCP tools
+
+| Tool | Description |
+|---|---|
+| `checkout` | Load a Penpot file into a headless working copy (`fileId` arg). Returns current `revn` and object count. |
+| `script` | Run a JS snippet against the working copy (`code` arg). Globals: `wc` (`addBoard`, `addRect`, `closeBoard`, `validate`, `pendingChanges`). Many edits in one call; no network until `commit`. |
+| `scene` | Return the full working-copy object map (id → shape). |
+| `validate` | Run Penpot's own `validate-file-schema!` on the local state. Returns `[]` on success; error details otherwise. |
+| `status` | Pending (uncommitted) change count + current `revn`. |
+| `commit` | Encode accumulated changes as transit+json and POST `update-file`. Validates before sending; rolls back on validation failure. |
+| `discard` | Drop the working copy without committing (call `checkout` again to start over). |
+
+### The `checkout → script → commit` flow
+
+```
+checkout(fileId)          # fetch file state; wc is now ready
+script(code)              # edit in-memory; repeat as needed
+validate()                # optional: confirm valid before committing
+commit()                  # persist to Penpot
+```
+
+### Example `script` payload
+
+This snippet (also used in `test/mcp-server.test.mjs`) adds a board and a rect inside it:
+
+```js
+const b = wc.addBoard({ x: 900, y: 60, width: 280, height: 180, name: 'MCP Board' });
+wc.addRect({ x: 920, y: 80, width: 100, height: 60, parentId: b, fills: [{ fillColor: '#3366ff' }] });
+wc.closeBoard();
+return wc.pendingChanges().length;   // → 2
+```
+
+`addBoard()` returns the new board's UUID. Pass it as `parentId` to `addRect()` (or any
+other shape adder) to nest the shape inside the board. `closeBoard()` finalises the
+board's `objects` index. Nothing hits the network until `commit()`.
+
+### Environment variables
+
+| Variable | Required | Description |
+|---|---|---|
+| `PENPOT_TOKEN` | Yes | Penpot access token (requires `enable-access-tokens` flag on the server). |
+| `PENPOT_HL_BASE` | No (default: `http://localhost:9101`) | Base URL of the Penpot instance. |
+
+### Claude Code registration
+
+Register the server once (user scope, so it persists across projects):
+
+```bash
+TOKEN=$(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync("/mnt/data/src/penpot/infra/penpot-hl/test-env.json")).token)')
+claude mcp add penpot-headless -s user \
+  -e PENPOT_TOKEN="$TOKEN" \
+  -e PENPOT_HL_BASE=http://localhost:9101 \
+  -- node /mnt/data/src/penpot/headless-core/mcp/server.mjs
+```
+
+Verify registration:
+
+```bash
+claude mcp list | grep penpot-headless
+# penpot-headless: node .../mcp/server.mjs - ✔ Connected
+```
+
+The server speaks stdio; Claude Code launches it on demand.
+
+### ISOLATION — penpot-hl only
+
+> **This server is wired to `penpot-hl` (port 9101) exclusively.**
+
+| Instance | Compose project | Ports | `enable-access-tokens` |
+|---|---|---|---|
+| **Live (owner)** | `penpot` | 9001 | NOT set by default |
+| **Throwaway (tests)** | `penpot-hl` | 9101 / 1180 | Set in `infra/penpot-hl/docker-compose.yaml` |
+
+To point the MCP server at a *different* instance, supply that instance's token and base
+URL in `PENPOT_TOKEN` / `PENPOT_HL_BASE`, **and** ensure `enable-access-tokens` is set
+in that instance's `docker-compose.yaml`. The owner's `:9001` instance does NOT have this
+flag and cannot accept token-based auth — do not use it.
+
+### Phase 1c deferrals
+
+The following remain out of scope and are targeted for Phase 1c:
+
+- **Text + flex/grid helpers** — `addText()` and auto-layout propagation require
+  browser-level metrics or a more involved reflow pass.
+- **`pp` CLI** — shell-friendly command-line interface wrapping `WorkingCopy` ops.
+- **Full Claude Code teaching skill** — a `/penpot-headless` skill that drives the
+  MCP server with guided prompts for AI-assisted design automation.
