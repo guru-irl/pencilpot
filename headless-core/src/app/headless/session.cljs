@@ -316,6 +316,44 @@
                    (let [file {:id file-id :data (:data @state) :features features}]
                      (try (cfv/validate-file-schema! file) (js/JSON.stringify #js [])
                           (catch :default e (js/JSON.stringify #js [(ex-message e)])))))
+       ;; Apply a JSON array of change maps (unit-test path, no transit).
+       ;; Each change must be a plain map with :type, :id, :page-id, :operations etc.
+       ;; We inject :page-id from the session's current page when absent.
+       :applyChanges
+       (fn [json]
+         (let [pid       (:page-id @state)
+               raw-arr   (js->clj (js/JSON.parse json) :keywordize-keys true)
+               ;; keywordize type/attr values that should be keywords
+               kw-change (fn [c]
+                           (cond-> c
+                             (:type c)    (update :type keyword)
+                             (nil? (:page-id c)) (assoc :page-id pid)
+                             (:operations c)
+                             (update :operations
+                                     (fn [ops]
+                                       (mapv (fn [op]
+                                               (cond-> op
+                                                 (:type op)  (update :type keyword)
+                                                 (:attr op)  (update :attr keyword)
+                                                 (:id op)    (update :id uuid/uuid)))
+                                             ops)))
+                             (:id c) (update :id uuid/uuid)
+                             (:page-id c) (update :page-id uuid/uuid)))
+               changes   (mapv kw-change raw-arr)]
+           (apply-raw-changes! state changes)
+           js/undefined))
+       ;; Apply a full transit-encoded update-file request body.
+       ;; Decodes the body, extracts :changes, and applies them.
+       :applyTransitUpdate
+       (fn [transit-body]
+         (let [decoded  (t/decode-str transit-body)
+               changes  (or (:changes decoded) [])
+               pid      (:page-id @state)
+               ;; transit-decoded changes already have keyword types/attrs and UUID ids
+               ;; but page-id may be absent from some; inject current page-id if missing.
+               patched  (mapv (fn [c] (if (:page-id c) c (assoc c :page-id pid))) changes)]
+           (apply-raw-changes! state patched)
+           js/undefined))
        :pendingChanges (fn [] (js/JSON.stringify (->plain-js (:changes @state))))
        :clearChanges
        (fn [] (swap! state assoc :changes []) js/undefined)
