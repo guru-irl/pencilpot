@@ -1,6 +1,7 @@
 (ns app.headless.session
   (:require
    [app.common.types.shape :as cts]              ; setup-shape (geometry)
+   [app.common.types.text :as txt]               ; change-text (text content + styles)
    [app.common.files.changes :as cfc]            ; process-changes (apply to file-data)
    [app.common.files.validate :as cfv]           ; validate-file-schema! (parity oracle)
    [app.common.types.file :as ctf]               ; make-file-data
@@ -78,6 +79,24 @@
                           (assoc s :stack stack :frame-id fid))))
          js/undefined)
        :addRect  (fn [json] (add-shape! state (mk-shape state :rect (args json))))
+       :addText
+       (fn [json]
+         (let [{:keys [x y width height name characters fontSize fontId fills growType parentId]} (args json)
+               {:keys [stack frame-id]} @state
+               styles (cond-> {}
+                        (seq fills) (assoc :fills (mapv (fn [f] {:fill-color (:fillColor f)
+                                                                 :fill-opacity (or (:fillOpacity f) 1)}) fills))
+                        fontSize    (assoc :font-size (str fontSize))
+                        fontId      (assoc :font-id fontId :font-family fontId))
+               shape (-> (cts/setup-shape
+                          {:id (uuid/next) :type :text :name (or name "Text")
+                           :x x :y y :width (or width 200) :height (or height 30)
+                           :grow-type (keyword (or growType "auto-width"))
+                           :parent-id (if parentId (uuid/parse parentId) (peek stack))
+                           :frame-id frame-id})
+                         (update :content txt/change-text (or characters "") styles)
+                         (dissoc :position-data))]
+           (add-shape! state shape)))
        :objects  (fn [] (js/JSON.stringify (->plain-js (get-in (:data @state) [:pages-index (:page-id @state) :objects]))))
        :getShape (fn [id] (js/JSON.stringify (->plain-js (get-in (:data @state) [:pages-index (:page-id @state) :objects (uuid/uuid id)]))))
        :validate (fn []

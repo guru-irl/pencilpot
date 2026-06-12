@@ -41,6 +41,18 @@ test("addRect honors parentId pointing at a non-top-of-stack board", () => {
   assert.deepEqual(JSON.parse(s.validate()), []);
 });
 
+test("addText creates a valid text shape with content", () => {
+  const s = createSession(JSON.stringify({ empty: true }));
+  const id = s.addText(JSON.stringify({ x: 10, y: 10, width: 200, height: 30, characters: "Hello headless", fontSize: 18, fills: [{ fillColor: "#111827" }] }));
+  assert.equal(typeof id, "string");
+  const objs = JSON.parse(s.objects());
+  const t = objs[id];
+  assert.equal(t.type, "text");
+  const runText = JSON.stringify(t.content);
+  assert.match(runText, /Hello headless/);
+  assert.deepEqual(JSON.parse(s.validate()), [], "text shape is Penpot-valid");
+});
+
 test("clearChanges resets recorded changes (no double-commit)", () => {
   const s = createSession(JSON.stringify({ empty: true }));
   s.addBoard(JSON.stringify({ x: 0, y: 0, width: 100, height: 100, name: "B" }));
