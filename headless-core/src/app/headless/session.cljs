@@ -4,6 +4,7 @@
    [app.common.types.text :as txt]               ; change-text (text content + styles)
    [app.common.files.changes :as cfc]            ; process-changes (apply to file-data)
    [app.common.files.changes-builder :as pcb]    ; update-shapes -> :mod-obj diffs
+   [app.common.types.shape.layout :as ctl]       ; grid cells (add-grid-column/assign-cells/reorder)
    [app.common.geom.modifiers :as gm]            ; set-objects-modifiers (layout engine)
    [app.common.types.modifiers :as ctm]          ; reflow-modifiers (seed)
    [app.common.geom.shapes :as gsh]              ; transform-shape (apply modifiers)
@@ -75,6 +76,15 @@
    :layout-wrap-type :nowrap :layout-padding-type :simple
    :layout-padding {:p1 0 :p2 0 :p3 0 :p4 0}})
 
+;; Default grid layout attrs (mirrors frontend shape_layout.cljs initial-grid-layout).
+(def ^:private initial-grid-layout
+  {:layout :grid :layout-grid-dir :row :layout-gap-type :multiple
+   :layout-gap {:row-gap 0 :column-gap 0} :layout-align-items :start
+   :layout-justify-items :start :layout-align-content :stretch
+   :layout-justify-content :stretch :layout-padding-type :simple
+   :layout-padding {:p1 0 :p2 0 :p3 0 :p4 0}
+   :layout-grid-cells {} :layout-grid-rows [] :layout-grid-columns []})
+
 (defn- objects-of [state]
   (get-in (:data @state) [:pages-index (:page-id @state) :objects]))
 
@@ -141,6 +151,43 @@
                          (pcb/update-shapes [bid] (fn [s] (merge s flex))))
                _     (apply-changes! state ch1)
                ;; (B) reflow children via Penpot's own modifier engine
+               objs2 (objects-of state)
+               tree  {bid {:modifiers (ctm/reflow-modifiers)}}
+               res   (gm/set-objects-modifiers tree objs2)
+               ids   (vec (keys res))
+               ch2   (-> (pcb/empty-changes nil pid)
+                         (pcb/with-page-id pid)
+                         (pcb/with-objects objs2)
+                         (pcb/update-shapes ids
+                                            (fn [s] (gsh/transform-shape s (get-in res [(:id s) :modifiers])))))
+               _     (apply-changes! state ch2)]
+           (js/JSON.stringify #js {:reflowed (count ids)})))
+       :setGridLayout
+       (fn [board-id opts-json]
+         (let [{:keys [cols gap padding dir]} (args opts-json)
+               bid   (uuid/parse board-id)
+               pid   (:page-id @state)
+               ncols (max 1 (or cols 2))
+               ;; Default to :column flow so children overflow into new ROWS
+               ;; (keeping the column count fixed at `ncols`); explicit `dir` wins.
+               grid  (cond-> (assoc initial-grid-layout :layout-grid-dir :column)
+                       dir             (assoc :layout-grid-dir (keyword dir))
+                       (some? gap)     (assoc :layout-gap {:row-gap gap :column-gap gap})
+                       (some? padding) (assoc :layout-padding {:p1 padding :p2 padding :p3 padding :p4 padding}))
+               ;; (A) set grid attrs + columns + assign cells on the board
+               objs1     (objects-of state)
+               board0    (get objs1 bid)
+               gridboard (-> board0
+                             (merge grid)
+                             (as-> b (reduce (fn [acc _] (ctl/add-grid-column acc ctl/default-track-value)) b (range ncols)))
+                             (ctl/assign-cells objs1)
+                             (ctl/reorder-grid-children))
+               ch1   (-> (pcb/empty-changes nil pid)
+                         (pcb/with-page-id pid)
+                         (pcb/with-objects objs1)
+                         (pcb/update-shapes [bid] (fn [_] gridboard)))
+               _     (apply-changes! state ch1)
+               ;; (B) reflow (the :grid branch of set-objects-modifiers fires automatically)
                objs2 (objects-of state)
                tree  {bid {:modifiers (ctm/reflow-modifiers)}}
                res   (gm/set-objects-modifiers tree objs2)

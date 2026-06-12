@@ -78,3 +78,19 @@ test("setFlexLayout arranges children in a row", () => {
   assert.ok(xs[1]-xs[0] >= 80 && xs[2]-xs[1] >= 80, `children spread by >=80 (got ${xs})`);
   assert.deepEqual(JSON.parse(s.validate()), []);
 });
+
+test("setGridLayout arranges children into a 2-column grid", () => {
+  const s = createSession(JSON.stringify({ empty: true }));
+  const b = s.addBoard(JSON.stringify({ x: 0, y: 0, width: 400, height: 400, name: "Grid" }));
+  const ids = [0,1,2,3].map(() => s.addRect(JSON.stringify({ x: 0, y: 0, width: 80, height: 60, parentId: b })));
+  s.closeBoard();
+  const out = JSON.parse(s.setGridLayout(b, JSON.stringify({ cols: 2, gap: 10 })));
+  assert.ok(out.reflowed >= 4, "children reflowed");
+  const objs = JSON.parse(s.objects());
+  assert.equal(objs[b].layout, "grid");
+  const xs = new Set(ids.map(id => Math.round(objs[id].selrect.x)));
+  const ys = new Set(ids.map(id => Math.round(objs[id].selrect.y)));
+  assert.equal(xs.size, 2, `2 distinct columns (xs=${[...xs]})`);
+  assert.equal(ys.size, 2, `2 distinct rows (ys=${[...ys]})`);
+  assert.deepEqual(JSON.parse(s.validate()), []);
+});
