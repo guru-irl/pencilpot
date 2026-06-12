@@ -387,6 +387,35 @@ URL in `PENPOT_TOKEN` / `PENPOT_HL_BASE`, **and** ensure `enable-access-tokens` 
 in that instance's `docker-compose.yaml`. The owner's `:9001` instance does NOT have this
 flag and cannot accept token-based auth — do not use it.
 
+### Sanity test (`npm run sanity`)
+
+A standalone AI-flow check that **spawns the real stdio server** (exactly how Claude Code
+launches it), connects an MCP client over stdio, and runs the full agent loop against
+`penpot-hl`:
+
+```bash
+cd headless-core && npm run sanity
+```
+
+```
+  ✓ tools/list exposes the 7 tools
+  ✓ checkout returns revn + object count
+  ✓ script adds board+rect (2 pending)
+  ✓ validate returns no errors
+  ✓ status reports 2 pending
+  ✓ commit persists (revn advances)
+  ✓ re-checkout shows +2 objects & advanced revn
+  ✓ board persisted as frame, width 240
+  ✓ nested rect persisted with fill
+  ✓ fresh working copy is clean (0 pending)
+PASS — headless MCP sanity OK
+```
+
+It exits non-zero on any failure. Unlike `test:mcp` (in-process via `InMemoryTransport`),
+this exercises the actual spawned binary + stdio transport + env config. Penpot shipped no
+MCP tests upstream, so this follows the repo's own conventions: `node:test` suites plus a
+standalone integration/sanity script (cf. `mcp/packages/server/scripts/integration-test-*`).
+
 ### Phase 1c deferrals
 
 The following remain out of scope and are targeted for Phase 1c:
