@@ -286,7 +286,7 @@ or remain deferred (1c):
   schema-valid; precise per-glyph `position-data` is computed by the editor on open
   (headless cannot measure font metrics). See the Phase 1b/1c README section.
 - **Flex reflow** — `setFlexLayout()` is now implemented (Phase 1c-2). Grid reflow
-  remains deferred.
+  is now implemented (Phase 1d) — see `setGridLayout()` above.
 - **`pp` CLI** — a command-line interface that drives `WorkingCopy` ops from shell
   scripts and CI pipelines. Deferred to Phase 1c.
 - **Claude Code skill** — a `/penpot-headless` skill that drives the MCP server for
@@ -380,6 +380,33 @@ wc.setFlexLayout(b, { dir: 'row', gap: 10, padding: 8 });
 await wc.commit();
 ```
 
+`setGridLayout(boardId, {cols, gap, padding, dir})` turns an existing board into a grid
+container and reflows its children into a fixed-column grid using Penpot's own modifier
+engine (`app.common.types.shape.layout`). Parameters:
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `boardId` | string (UUID) | required | The board to make a grid container. |
+| `cols` | number | `2` | Number of columns. Children fill left-to-right, then wrap to new rows. |
+| `gap` | number | `0` | Gap (in px) between cells in both directions. |
+| `padding` | number | `0` | Uniform padding (in px) inside the board on all sides. |
+| `dir` | `"column"` \| `"row"` | `"column"` | Primary fill direction. `"column"` (default) fills columns first, wrapping into rows — so a fixed `cols` count produces a natural multi-row grid. `"row"` fills rows first. |
+
+After the call the board's `layout` field is set to `"grid"` and each child is assigned
+to a cell; `x`/`y` positions are updated by Penpot's engine to reflect the grid. The
+call counts as a pending change and is persisted by the next `commit()`.
+
+```js
+const b = wc.addBoard({ x: 0, y: 0, width: 360, height: 240, name: 'Grid' });
+for (let i = 0; i < 6; i++)
+  wc.addRect({ x: 0, y: 0, width: 80, height: 60, parentId: b,
+               fills: [{ fillColor: '#3366ff' }] });
+wc.closeBoard();
+wc.setGridLayout(b, { cols: 3, gap: 12, padding: 16 });
+// 6 children arranged in 2 rows × 3 columns, with 12 px gaps and 16 px board padding
+await wc.commit();
+```
+
 ### Environment variables
 
 | Variable | Required | Description |
@@ -451,11 +478,10 @@ this exercises the actual spawned binary + stdio transport + env config. Penpot 
 MCP tests upstream, so this follows the repo's own conventions: `node:test` suites plus a
 standalone integration/sanity script (cf. `mcp/packages/server/scripts/integration-test-*`).
 
-### Phase 1c deferrals
+### Phase 1c/1d deferrals
 
 The following remain out of scope:
 
-- **Grid auto-layout** — grid reflow is not yet exposed via `wc`.
 - **Ellipses / paths / components** — not yet exposed via `wc`.
 - **`pp` CLI** — shell-friendly command-line interface wrapping `WorkingCopy` ops.
 - **Full Claude Code teaching skill** — a `/penpot-headless` skill that drives the
