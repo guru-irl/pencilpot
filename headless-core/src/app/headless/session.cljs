@@ -316,7 +316,8 @@
                    (let [file {:id file-id :data (:data @state) :features features}]
                      (try (cfv/validate-file-schema! file) (js/JSON.stringify #js [])
                           (catch :default e (js/JSON.stringify #js [(ex-message e)])))))
-       ;; Apply a JSON array of change maps (unit-test path, no transit).
+       ;; Apply a JSON array of change maps (single-page, test-only convenience — NOT
+       ;; the canonical update path; use applyTransitUpdate for real SPA changes).
        ;; Each change must be a plain map with :type, :id, :page-id, :operations etc.
        ;; We inject :page-id from the session's current page when absent.
        :applyChanges
@@ -342,17 +343,17 @@
                changes   (mapv kw-change raw-arr)]
            (apply-raw-changes! state changes)
            js/undefined))
-       ;; Apply a full transit-encoded update-file request body.
-       ;; Decodes the body, extracts :changes, and applies them.
+       ;; Apply a full transit-encoded update-file request body (canonical path).
+       ;; Real Penpot update-file changes already carry their own :page-id (or are
+       ;; intentionally page-less / component-targeted), so they are applied VERBATIM.
+       ;; Do NOT inject the session's current page-id — doing so can mis-target
+       ;; multi-page or component changes.
        :applyTransitUpdate
        (fn [transit-body]
          (let [decoded  (t/decode-str transit-body)
-               changes  (or (:changes decoded) [])
-               pid      (:page-id @state)
-               ;; transit-decoded changes already have keyword types/attrs and UUID ids
-               ;; but page-id may be absent from some; inject current page-id if missing.
-               patched  (mapv (fn [c] (if (:page-id c) c (assoc c :page-id pid))) changes)]
-           (apply-raw-changes! state patched)
+               changes  (or (:changes decoded) [])]
+           ;; transit-decoded changes already have keyword types/attrs and UUID ids
+           (apply-raw-changes! state changes)
            js/undefined))
        :pendingChanges (fn [] (js/JSON.stringify (->plain-js (:changes @state))))
        :clearChanges
@@ -396,7 +397,11 @@
    {dataTransit, fileId, features} hydrated from get-file (transit), or
    {fromTransit, meta} to re-hydrate from a getFileResponse() result."
   [args-json]
-  (let [{:keys [empty dataTransit fileId features fromTransit meta name]} (args args-json)
+  ;; Rename `name` and `meta` to `nm-arg` / `meta-arg` to avoid shadowing
+  ;; clojure.core/name and clojure.core/meta (matching convention in mk-shape etc.).
+  (let [{:keys [empty dataTransit fileId features fromTransit]
+         nm-arg   :name
+         meta-arg :meta} (args args-json)
         ;; fromTransit path: decode a transit body (either a full get-file response or a
         ;; getFileResponse()-emitted body).  Both have :data inline; a full get-file also
         ;; carries :permissions/:team-id/:project-id/:version etc. — we keep the whole map
@@ -405,12 +410,12 @@
         ;; Preserve the full envelope (everything except :data, which we manage live).
         envelope   (when (and decoded-ft (:data decoded-ft))
                      (dissoc decoded-ft :data))
-        ;; Choose file-id: prefer meta.id > fileId > decoded > fresh
+        ;; Choose file-id: prefer meta-arg.id > fileId > decoded > fresh
         file-id (cond
-                  (and meta (:id meta)) (uuid/uuid (:id meta))
-                  fileId                (uuid/uuid fileId)
-                  decoded-ft            (or (:id decoded-ft) (uuid/next))
-                  :else                 (uuid/next))
+                  (and meta-arg (:id meta-arg)) (uuid/uuid (:id meta-arg))
+                  fileId                        (uuid/uuid fileId)
+                  decoded-ft                    (or (:id decoded-ft) (uuid/next))
+                  :else                         (uuid/next))
         ;; get-file transit decodes to a FULL FILE map (keys: :id :data :revn
         ;; :vern :features ...), so unwrap :data; tolerate a bare data value too.
         decoded (when (and (not empty) (not fromTransit)) (when dataTransit (t/decode-str dataTransit)))
@@ -426,10 +431,10 @@
                     (when decoded-ft (:features decoded-ft))
                     ["components/v2" "fdata/shape-data-type" "fdata/path-data"
                      "styles/v2" "layout/grid" "plugins/runtime"])
-        ;; Carry revn/vern/name from decoded-ft or meta for getFileResponse round-trips
-        revn    (or (when decoded-ft (:revn decoded-ft)) (when meta (:revn meta)) 0)
-        vern    (or (when decoded-ft (:vern decoded-ft)) (when meta (:vern meta)) 0)
-        nm      (or (when decoded-ft (:name decoded-ft)) (when meta (:name meta)) name "Pencilpot File")]
+        ;; Carry revn/vern/name from decoded-ft or meta-arg for getFileResponse round-trips
+        revn    (or (when decoded-ft (:revn decoded-ft)) (when meta-arg (:revn meta-arg)) 0)
+        vern    (or (when decoded-ft (:vern decoded-ft)) (when meta-arg (:vern meta-arg)) 0)
+        nm      (or (when decoded-ft (:name decoded-ft)) (when meta-arg (:name meta-arg)) nm-arg "Pencilpot File")]
     (make-session (atom {:data data :page-id page-id :frame-id root-frame
                          :stack [root-frame] :changes []
                          :revn revn :vern vern :name nm
