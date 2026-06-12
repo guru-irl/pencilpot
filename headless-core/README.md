@@ -285,9 +285,8 @@ or remain deferred (1c):
 - **Text shapes** — `addText()` is implemented (Phase 1c-1). Text persists and is
   schema-valid; precise per-glyph `position-data` is computed by the editor on open
   (headless cannot measure font metrics). See the Phase 1b/1c README section.
-- **Flex / grid reflow** — `app.common.types.shape.layout` reflow calls are
-  implemented in `app.common.*` but the integration into the headless session (auto
-  layout propagation on commit) is deferred to Phase 1c.
+- **Flex reflow** — `setFlexLayout()` is now implemented (Phase 1c-2). Grid reflow
+  remains deferred.
 - **`pp` CLI** — a command-line interface that drives `WorkingCopy` ops from shell
   scripts and CI pipelines. Deferred to Phase 1c.
 - **Claude Code skill** — a `/penpot-headless` skill that drives the MCP server for
@@ -314,7 +313,7 @@ See:
 | Tool | Description |
 |---|---|
 | `checkout` | Load a Penpot file into a headless working copy (`fileId` arg). Returns current `revn` and object count. |
-| `script` | Run a JS snippet against the working copy (`code` arg). Globals: `wc` (`addBoard`, `addRect`, `addText`, `closeBoard`, `validate`, `pendingChanges`). Many edits in one call; no network until `commit`. |
+| `script` | Run a JS snippet against the working copy (`code` arg). Globals: `wc` (`addBoard`, `addRect`, `addText`, `closeBoard`, `setFlexLayout`, `validate`, `pendingChanges`). Many edits in one call; no network until `commit`. |
 | `scene` | Return the full working-copy object map (id → shape). |
 | `validate` | Run Penpot's own `validate-file-schema!` on the local state. Returns `[]` on success; error details otherwise. |
 | `status` | Pending (uncommitted) change count + current `revn`. |
@@ -351,6 +350,35 @@ adds a text shape and returns its UUID. Multi-line text is supported via `"\n"` 
 computed by the Penpot editor when the file is opened — headless cannot measure font
 metrics — so text dimensions and line-wrapping settle when the file is next opened in the
 editor. The shape is schema-valid and persists correctly on `commit`.
+
+`setFlexLayout(boardId, {dir, gap, padding, align, justify, wrap})` turns an existing
+board into a flex container and immediately reflows its children using Penpot's own
+modifier engine (`app.common.types.shape.layout`). Parameters:
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `boardId` | string (UUID) | required | The board to make a flex container. |
+| `dir` | `"row"` \| `"column"` | `"row"` | Main axis direction. `"row"` spaces children along x; `"column"` along y. |
+| `gap` | number | `0` | Gap (in px) between children along the main axis. |
+| `padding` | number | `0` | Uniform padding (in px) inside the board on all sides. |
+| `align` | string | `"start"` | Cross-axis alignment of children (`"start"`, `"center"`, `"end"`). |
+| `justify` | string | `"start"` | Main-axis justification (`"start"`, `"center"`, `"end"`, `"space-between"`). |
+| `wrap` | boolean | `false` | Whether children wrap onto a new line when they overflow the main axis. |
+
+After the call the board's `layout` field is set to `"flex"` and each child's `x`/`y`
+position is updated to reflect the reflow (e.g. `dir:"row"` with `gap:10` places
+children at x = 0, 90, 180, … for 80 px-wide shapes). `setFlexLayout` counts as a
+pending change and is persisted by the next `commit()`.
+
+```js
+const b = wc.addBoard({ x: 0, y: 0, width: 400, height: 120, name: 'Row' });
+for (let i = 0; i < 3; i++)
+  wc.addRect({ x: 0, y: 0, width: 80, height: 60, parentId: b });
+wc.closeBoard();
+wc.setFlexLayout(b, { dir: 'row', gap: 10, padding: 8 });
+// children are now at x ≈ 8, 98, 188 (padding + gap applied by Penpot's engine)
+await wc.commit();
+```
 
 ### Environment variables
 
@@ -425,10 +453,9 @@ standalone integration/sanity script (cf. `mcp/packages/server/scripts/integrati
 
 ### Phase 1c deferrals
 
-The following remain out of scope and are targeted for Phase 1c:
+The following remain out of scope:
 
-- **Flex/grid auto-layout** — `app.common.types.shape.layout` reflow propagation on
-  commit requires a more involved reflow pass; deferred.
+- **Grid auto-layout** — grid reflow is not yet exposed via `wc`.
 - **Ellipses / paths / components** — not yet exposed via `wc`.
 - **`pp` CLI** — shell-friendly command-line interface wrapping `WorkingCopy` ops.
 - **Full Claude Code teaching skill** — a `/penpot-headless` skill that drives the
@@ -437,3 +464,7 @@ The following remain out of scope and are targeted for Phase 1c:
 > **Phase 1c-1 (text) complete:** `addText()` is now implemented on `HeadlessSession`,
 > `WorkingCopy`, and the MCP `script` sandbox. Text shapes persist correctly;
 > see the position-data caveat above.
+
+> **Phase 1c-2 (flex) complete:** `setFlexLayout()` is now implemented on `HeadlessSession`,
+> `WorkingCopy`, and the MCP `script` sandbox. Boards persist with `layout:"flex"` and
+> children are reflowed by Penpot's own modifier engine on commit.
