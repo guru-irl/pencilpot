@@ -19,7 +19,11 @@ export async function proxyHttp(req, res, { rewriteConfig = true } = {}) {
     js += `\n;globalThis.penpotPublicURI=location.origin;globalThis.penpotFlags="";\n`;
     buf = Buffer.from(js, "utf8");
   }
-  res.writeHead(upstream.status, { "content-type": ct, "cache-control": "no-store" });
+  // Forward important upstream response headers (Set-Cookie, etc.).
+  const outHeaders = { "content-type": ct, "cache-control": "no-store" };
+  const setCookie = upstream.headers.get("set-cookie");
+  if (setCookie) outHeaders["set-cookie"] = setCookie;
+  res.writeHead(upstream.status, outHeaders);
   res.end(buf);
 }
 

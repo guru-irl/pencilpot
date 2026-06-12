@@ -2,11 +2,14 @@
 export const ADMIN = { email: "hl@penpot.local", password: "penpot1234" };
 
 // Log into penpot-hl through our proxy (only needed in proxy/record mode).
+// Penpot uses hash routing (/#/auth/login).
+// Form: input[type=email] placeholder="Work email", input[type=password] placeholder="Password",
+// button[type=submit] text="Continue".
 export async function login(page) {
   await page.goto("/#/auth/login");
-  await page.getByLabel(/email/i).fill(ADMIN.email);
-  await page.getByLabel(/password/i).fill(ADMIN.password);
-  await page.getByRole("button", { name: /login|log in|sign in/i }).click();
+  await page.locator("input[type=email]").fill(ADMIN.email);
+  await page.locator("input[type=password]").fill(ADMIN.password);
+  await page.getByRole("button", { name: /continue/i }).click();
   await page.waitForURL(/dashboard/i, { timeout: 30_000 });
 }
 
