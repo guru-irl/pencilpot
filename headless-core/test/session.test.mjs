@@ -103,3 +103,24 @@ test("addEllipse creates a valid circle shape", () => {
   assert.equal(objs[id].selrect.width, 120);
   assert.deepEqual(JSON.parse(s.validate()), []);
 });
+
+test("setGrowType changes a text shape's grow-type", () => {
+  const s = createSession(JSON.stringify({ empty: true }));
+  const t = s.addText(JSON.stringify({ x: 0, y: 0, width: 100, height: 30, characters: "Hi" }));
+  s.setGrowType(t, "fixed");
+  const o = JSON.parse(s.objects());
+  assert.equal(o[t]["grow-type"], "fixed");
+  assert.deepEqual(JSON.parse(s.validate()), []);
+});
+
+test("setConstraints sets horizontal + vertical constraints", () => {
+  const s = createSession(JSON.stringify({ empty: true }));
+  const b = s.addBoard(JSON.stringify({ x: 0, y: 0, width: 200, height: 200 }));
+  const r = s.addRect(JSON.stringify({ x: 10, y: 10, width: 50, height: 50, parentId: b }));
+  s.closeBoard();
+  s.setConstraints(r, JSON.stringify({ h: "right", v: "bottom" }));
+  const o = JSON.parse(s.objects());
+  assert.equal(o[r]["constraints-h"], "right");
+  assert.equal(o[r]["constraints-v"], "bottom");
+  assert.deepEqual(JSON.parse(s.validate()), []);
+});

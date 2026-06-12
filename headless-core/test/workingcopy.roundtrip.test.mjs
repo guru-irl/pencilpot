@@ -74,6 +74,20 @@ test("WorkingCopy: grid layout arranges + persists", async () => {
   assert.equal(xs.size, 2, `2 columns persisted (xs=${[...xs]})`);
 });
 
+test("WorkingCopy: constraints persist", async () => {
+  const wc = await new WorkingCopy(env.fileId, env.token).checkout();
+  const b = wc.addBoard({ x: 2100, y: 80, width: 200, height: 200, name: "Cons" });
+  const r = wc.addRect({ x: 2110, y: 90, width: 50, height: 50, parentId: b });
+  wc.closeBoard();
+  wc.setConstraints(r, { h: "right", v: "bottom" });
+  assert.deepEqual(wc.validate(), []);
+  await wc.commit();
+  const after = await getFile(env.fileId, env.token);
+  const o = after.raw.data.pagesIndex[after.pageId].objects[r];
+  // getFile returns transit-decoded JS objects with camelCase keys (server format)
+  assert.equal(o.constraintsH ?? o["constraints-h"], "right");
+});
+
 test("WorkingCopy: add ellipse persists as circle", async () => {
   const before = await getFile(env.fileId, env.token);
   const beforeCount = Object.keys(before.raw.data.pagesIndex[before.pageId].objects).length;

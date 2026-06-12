@@ -200,6 +200,25 @@
                                             (fn [s] (gsh/transform-shape s (get-in res [(:id s) :modifiers])))))
                _     (apply-changes! state ch2)]
            (js/JSON.stringify #js {:reflowed (count ids)})))
+       :setGrowType
+       (fn [shape-id mode]
+         (let [pid (:page-id @state) id (uuid/parse shape-id)
+               ch (-> (pcb/empty-changes nil pid)
+                      (pcb/with-page-id pid)
+                      (pcb/with-objects (objects-of state))
+                      (pcb/update-shapes [id] (fn [s] (assoc s :grow-type (keyword mode)))))]
+           (apply-changes! state ch) js/undefined))
+       :setConstraints
+       (fn [shape-id opts-json]
+         (let [{:keys [h v]} (args opts-json)
+               pid (:page-id @state) id (uuid/parse shape-id)
+               ch (-> (pcb/empty-changes nil pid)
+                      (pcb/with-page-id pid)
+                      (pcb/with-objects (objects-of state))
+                      (pcb/update-shapes [id] (fn [s] (cond-> s
+                                                         h (assoc :constraints-h (keyword h))
+                                                         v (assoc :constraints-v (keyword v))))))]
+           (apply-changes! state ch) js/undefined))
        :objects  (fn [] (js/JSON.stringify (->plain-js (get-in (:data @state) [:pages-index (:page-id @state) :objects]))))
        :getShape (fn [id] (js/JSON.stringify (->plain-js (get-in (:data @state) [:pages-index (:page-id @state) :objects (uuid/uuid id)]))))
        :validate (fn []

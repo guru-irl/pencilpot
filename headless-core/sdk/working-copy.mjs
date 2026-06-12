@@ -19,6 +19,8 @@ export class WorkingCopy {
   closeBoard(){ return this.session.closeBoard(); }
   setFlexLayout(boardId, opts) { return this.session.setFlexLayout(boardId, JSON.stringify(opts)); }
   setGridLayout(boardId, opts) { return this.session.setGridLayout(boardId, JSON.stringify(opts)); }
+  setGrowType(id, mode) { return this.session.setGrowType(id, mode); }
+  setConstraints(id, opts) { return this.session.setConstraints(id, JSON.stringify(opts)); }
 
   validate() { return JSON.parse(this.session.validate()); }
   pendingChanges() { return JSON.parse(this.session.pendingChanges()); }
