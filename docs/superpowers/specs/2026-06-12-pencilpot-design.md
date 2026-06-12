@@ -28,6 +28,7 @@ It is to Penpot what a local code editor is to a cloud IDE: lean, file-native, v
 - **First-class testing** and **first-class documentation** as definition-of-done in every phase.
 
 **Non-goals (v1)**
+- **Authentication / login of any kind.** No accounts, sessions, cookies, tokens, profiles, or login screen — it is a local single-user IDE. The auth/login *layer is removed entirely*, not stubbed-pretty, and the local server has zero auth.
 - Real-time multi-user collaboration, presence, comments. Gone — not stubbed-pretty.
 - Cloud accounts, sharing links, webhooks, billing, admin.
 - Custom font *upload* management (bundled Google fonts only in v1).
@@ -63,6 +64,7 @@ So the local server **is** headless-core's engine + filesystem persistence + RPC
 | **App shell** | Local web app: Chromium `--app` window, optionally installable as a **PWA**. No Electron/Tauri. |
 | **AI agent** | Agent-agnostic, **default Claude Code**. Prebake `CLAUDE.md` + `AGENTS.md` + `.mcp.json` + `pp` on PATH. |
 | **Git UX** | Terminal/CLI-driven. App auto-`git init`s and keeps saves diff-friendly; no in-canvas git UI in v1. |
+| **Auth/login** | **Removed entirely.** No accounts, sessions, cookies, tokens, profiles, or login screen. The local server performs zero auth; the frontend's auth routes, login-redirect guard, boot-time profile fetch, and websocket-auth gate are all deleted. |
 | **Frontend** | Strip dashboard/auth/collab routes + boot; repoint `cmd!`; boot straight to the designer. Keep ~100% designer UI. |
 
 ## 5. On-disk format
@@ -102,7 +104,7 @@ Each gets its own spec + implementation plan.
 
 - **L · Local runtime server** — Node HTTP server reusing headless-core. Serves the SPA and the workspace RPC commands from disk; resolves shared libraries; stubs teams/projects/profile/fonts/thumbnails. Hosts the `/pty` websocket. *(absorbs SDK Phase 3)*
 - **S · Exploded git-native store** — deterministic, diff-stable serializer/deserializer over headless-core's model; project + `shared/` layout; manifest + links; auto `git init`.
-- **F · Frontend strip & repoint** — remove dashboard/auth/collab routes + boot sequence; repoint `cmd!`; boot straight into the workspace; stub feature-flags/permissions client-side. Keeps ~100% of the designer UI.
+- **F · Frontend strip & repoint** — **delete the entire auth/login layer** (the `/auth/*` routes, the login-redirect guard in `routes.cljs`, the boot-time `get-profile`/`get-teams` fetch in `main.cljs`'s `initialize`, the `is-authenticated?` websocket gate) plus the dashboard and collab routes; repoint `cmd!`; boot straight into the workspace; treat the single local user as implicit (no profile object). Keeps ~100% of the designer UI.
 - **D · Desktop packaging** — `--app` launcher, `*.penpot` OS file association, open-file/open-project flow, optional PWA manifest.
 - **T · Integrated terminal + AI** — xterm.js panel + node-pty in the server; prebaked working dir (`CLAUDE.md` + `AGENTS.md` + `.mcp.json` → headless engine, `pp` on PATH); auto-launch `$PENPOT_AI_AGENT` (default `claude`).
 

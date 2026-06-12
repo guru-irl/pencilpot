@@ -15,6 +15,7 @@
 - **In scope:** the local server, the record/replay/mutate stages, one new engine method (`getFileResponse`) + a tiny disk store, automated tests for the engine/mutate paths, manual verification for canvas rendering, and a written go/no-go spike report.
 - **Out of scope (later phases):** building/serving our own stripped frontend bundle (Phase 2/3), the exploded git-native directory format (Phase 1/S — the spike stores the file as a single transit blob + meta JSON), shared libraries (Phase 1), the terminal/AI panel (Phase 4), file association / `--app` packaging polish (Phase 3 — here we just launch a Chromium `--app` window by hand).
 - **Decision this spike produces:** GO (the program is viable as specced) or NO-GO/REVISE (with the specific blocker), recorded in `pencilpot/spike/SPIKE-REPORT.md`.
+- **Auth/login note:** pencilpot has **no auth/login layer at all** (spec §2 non-goals). But Phase 0 runs the *stock, unmodified* bundle, which still bounces to `/auth/login` when `get-profile` returns the anonymous id. So the spike replays a **synthetic constant local identity** (a non-zero profile fixture) purely to let the unmodified SPA proceed into the canvas — this is *not* auth (no password, session, or token is ever checked). The actual **deletion** of the auth/login routes, the login-redirect guard, the boot-time profile fetch, and the ws-auth gate happens in **Phase 2 (sub-project F)**, where we edit the frontend. The spike's `record.spec.mjs` logs into penpot-hl only to capture the real RPC contract from the real backend.
 
 ## File structure
 
