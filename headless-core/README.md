@@ -468,3 +468,77 @@ The following remain out of scope:
 > **Phase 1c-2 (flex) complete:** `setFlexLayout()` is now implemented on `HeadlessSession`,
 > `WorkingCopy`, and the MCP `script` sandbox. Boards persist with `layout:"flex"` and
 > children are reflowed by Penpot's own modifier engine on commit.
+
+> **Phase 1c-3 (`pp` CLI) complete:** `bin/pp.mjs` is implemented with `run` and `scene`
+> subcommands. `npm run test:cli` is wired into `npm run verify` as the final layer.
+
+---
+
+## `pp` CLI
+
+A shell-friendly command-line interface that drives `WorkingCopy` operations from terminals
+and CI pipelines. Each invocation is self-contained (checkout → edit → commit in one shot).
+
+### Running the CLI
+
+```bash
+# From headless-core/ directly (no install step):
+node bin/pp.mjs <cmd> [args]
+
+# Or link once to get `pp` on $PATH:
+cd headless-core && npm link
+pp <cmd> [args]
+```
+
+### Subcommands
+
+#### `pp run <fileId> -e "<script>"`
+
+One-shot edit: checkout the file, run the JS script against the working copy, validate, and
+commit. The script has the same `wc` globals as the MCP `script` tool.
+
+```bash
+# Add a board and commit it:
+pp run abc123 -e "
+  const b = wc.addBoard({ x: 0, y: 0, width: 400, height: 300, name: 'Hero' });
+  wc.addRect({ x: 20, y: 20, width: 200, height: 100, parentId: b,
+               fills: [{ fillColor: '#3366ff' }] });
+  wc.closeBoard();
+"
+```
+
+On success the new `revn` is printed to stdout. On validation or commit failure the process
+exits non-zero.
+
+#### `pp scene <fileId>`
+
+Prints the full object map (`id → shape`) for the file as JSON to stdout, without making
+any changes or committing.
+
+```bash
+pp scene abc123 | jq 'keys'
+```
+
+### Environment variables
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `PENPOT_TOKEN` | Yes | — | Penpot access token (requires `enable-access-tokens` on the server). |
+| `PENPOT_HL_BASE` | No | `http://localhost:9101` | Base URL of the Penpot instance. |
+
+### MCP vs CLI
+
+| | MCP tools | CLI (`pp`) |
+|---|---|---|
+| **Use case** | Interactive AI sessions | Shell scripts, CI |
+| **State** | Stateful across tool calls | Self-contained per invocation |
+| **Interface** | `checkout` / `script` / `commit` | `pp run` / `pp scene` |
+| **Under the hood** | `WorkingCopy` | `WorkingCopy` (same API) |
+
+### Test
+
+```bash
+npm run test:cli         # runs test/cli.test.mjs (requires penpot-hl at :9101)
+```
+
+This test is included in `npm run verify` as the final layer.
