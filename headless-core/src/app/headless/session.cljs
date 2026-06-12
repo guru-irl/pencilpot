@@ -17,6 +17,7 @@
    [app.common.uuid :as uuid]
    [app.common.geom.matrix]                       ; side-effect: transit handler
    [app.common.geom.point]                        ; side-effect: transit handler
+   [app.pencilpot.store :as store]               ; canonical-EDN store serializer
    [clojure.walk :as walk]))
 
 (def ^:private root-frame uuid/zero)              ; page root frame id
@@ -364,6 +365,28 @@
                params {:id file-id :session-id (uuid/parse sessionId)
                        :revn revn :vern vern :features (set features) :changes (:changes @state)}]
            (t/encode-str params)))
+       :serializeStore
+       ;; Returns JSON: {manifest:"<edn>", pages:{"<uuid>":"<edn>",...}, components:{...}, media:[...]}
+       ;; The EDN is canonical (sorted keys, #uuid literals) and deterministic.
+       (fn [] (js/JSON.stringify (clj->js (store/serialize-store file-id @state))))
+       :loadStore
+       ;; Resets the session's data from a parts map previously produced by serializeStore.
+       ;; `parts` may be a JS object (clj->js boundary) — js->clj converts keys to strings.
+       (fn [parts]
+         (let [loaded (store/load-store (js->clj parts))]
+           (swap! state #(-> %
+                             (assoc :data     (:data loaded))
+                             (assoc :revn     (:revn loaded))
+                             (assoc :vern     (:vern loaded))
+                             (assoc :name     (:name loaded))
+                             (assoc :features (:features loaded))
+                             (assoc :libraries (:libraries loaded))
+                             ;; Reset page cursor to first page from the loaded data
+                             (assoc :page-id  (first (get-in loaded [:data :pages])))
+                             ;; Reset frame/stack to root
+                             (assoc :frame-id root-frame)
+                             (assoc :stack    [root-frame])))
+           js/undefined))
        :getFileResponse
        ;; Returns JSON: { meta: {id, name, revn, vern, features, ...}, transit: "<transit-string>" }
        ;; If a full file envelope was captured on hydration (:file-envelope in state), the transit
@@ -394,14 +417,23 @@
 
 (defn ^:export create-session
   "args-json: either {empty:true,name} for a fresh file,
-   {dataTransit, fileId, features} hydrated from get-file (transit), or
-   {fromTransit, meta} to re-hydrate from a getFileResponse() result."
+   {dataTransit, fileId, features} hydrated from get-file (transit),
+   {fromTransit, meta} to re-hydrate from a getFileResponse() result, or
+   {fromStore, ...} to re-hydrate from a serializeStore() result."
   [args-json]
   ;; Rename `name` and `meta` to `nm-arg` / `meta-arg` to avoid shadowing
   ;; clojure.core/name and clojure.core/meta (matching convention in mk-shape etc.).
-  (let [{:keys [empty dataTransit fileId features fromTransit]
+  (let [{:keys [empty dataTransit fileId features fromTransit fromStore]
          nm-arg   :name
          meta-arg :meta} (args args-json)
+        ;; fromStore path: load from canonical-EDN parts map.
+        ;; We must re-parse from the raw JSON to get string-keyed maps (not keyword-keyed),
+        ;; because the uuid-string keys in :pages/:components must stay as strings for
+        ;; store/load-store (which uses (get parts "manifest") etc.).
+        ;; `args` uses :keywordize-keys true which would corrupt uuid-string keys.
+        raw-parsed        (js->clj (js/JSON.parse args-json))
+        from-store-raw    (get raw-parsed "fromStore")
+        from-store-loaded (when from-store-raw (store/load-store from-store-raw))
         ;; fromTransit path: decode a transit body (either a full get-file response or a
         ;; getFileResponse()-emitted body).  Both have :data inline; a full get-file also
         ;; carries :permissions/:team-id/:project-id/:version etc. — we keep the whole map
@@ -410,31 +442,45 @@
         ;; Preserve the full envelope (everything except :data, which we manage live).
         envelope   (when (and decoded-ft (:data decoded-ft))
                      (dissoc decoded-ft :data))
-        ;; Choose file-id: prefer meta-arg.id > fileId > decoded > fresh
+        ;; Choose file-id: prefer fromStore > meta-arg.id > fileId > decoded > fresh
         file-id (cond
+                  from-store-loaded             (:file-id from-store-loaded)
                   (and meta-arg (:id meta-arg)) (uuid/uuid (:id meta-arg))
                   fileId                        (uuid/uuid fileId)
                   decoded-ft                    (or (:id decoded-ft) (uuid/next))
                   :else                         (uuid/next))
         ;; get-file transit decodes to a FULL FILE map (keys: :id :data :revn
         ;; :vern :features ...), so unwrap :data; tolerate a bare data value too.
-        decoded (when (and (not empty) (not fromTransit)) (when dataTransit (t/decode-str dataTransit)))
+        decoded (when (and (not empty) (not fromTransit) (not fromStore))
+                  (when dataTransit (t/decode-str dataTransit)))
         data    (cond
-                  empty       (empty-data)
-                  fromTransit (or (:data decoded-ft) decoded-ft)
-                  :else       (or (:data decoded) decoded))
+                  empty             (empty-data)
+                  from-store-loaded (:data from-store-loaded)
+                  fromTransit       (or (:data decoded-ft) decoded-ft)
+                  :else             (or (:data decoded) decoded))
         _       (when-not empty
                   (when-not (:pages data)
                     (throw (ex-info "create-session: decoded file has no :pages (bad hydrate payload)" {}))))
         page-id (or (page-id-of data) (first (:pages data)))
         feats   (or features
+                    (when from-store-loaded (:features from-store-loaded))
                     (when decoded-ft (:features decoded-ft))
                     ["components/v2" "fdata/shape-data-type" "fdata/path-data"
                      "styles/v2" "layout/grid" "plugins/runtime"])
-        ;; Carry revn/vern/name from decoded-ft or meta-arg for getFileResponse round-trips
-        revn    (or (when decoded-ft (:revn decoded-ft)) (when meta-arg (:revn meta-arg)) 0)
-        vern    (or (when decoded-ft (:vern decoded-ft)) (when meta-arg (:vern meta-arg)) 0)
-        nm      (or (when decoded-ft (:name decoded-ft)) (when meta-arg (:name meta-arg)) nm-arg "Pencilpot File")]
+        ;; Carry revn/vern/name from fromStore > decoded-ft > meta-arg
+        revn    (or (when from-store-loaded (:revn from-store-loaded))
+                    (when decoded-ft (:revn decoded-ft))
+                    (when meta-arg (:revn meta-arg))
+                    0)
+        vern    (or (when from-store-loaded (:vern from-store-loaded))
+                    (when decoded-ft (:vern decoded-ft))
+                    (when meta-arg (:vern meta-arg))
+                    0)
+        nm      (or (when from-store-loaded (:name from-store-loaded))
+                    (when decoded-ft (:name decoded-ft))
+                    (when meta-arg (:name meta-arg))
+                    nm-arg
+                    "Pencilpot File")]
     (make-session (atom {:data data :page-id page-id :frame-id root-frame
                          :stack [root-frame] :changes []
                          :revn revn :vern vern :name nm
