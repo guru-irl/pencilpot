@@ -12,9 +12,10 @@ export class WorkingCopy {
     return this;
   }
 
-  addBoard(p) { return this.session.addBoard(JSON.stringify(p)); }
-  addRect(p)  { return this.session.addRect(JSON.stringify(p)); }
-  addText(p)  { return this.session.addText(JSON.stringify(p)); }
+  addBoard(p)   { return this.session.addBoard(JSON.stringify(p)); }
+  addRect(p)    { return this.session.addRect(JSON.stringify(p)); }
+  addEllipse(p) { return this.session.addEllipse(JSON.stringify(p)); }
+  addText(p)    { return this.session.addText(JSON.stringify(p)); }
   closeBoard(){ return this.session.closeBoard(); }
   setFlexLayout(boardId, opts) { return this.session.setFlexLayout(boardId, JSON.stringify(opts)); }
   setGridLayout(boardId, opts) { return this.session.setGridLayout(boardId, JSON.stringify(opts)); }

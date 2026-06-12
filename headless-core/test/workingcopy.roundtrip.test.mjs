@@ -73,3 +73,16 @@ test("WorkingCopy: grid layout arranges + persists", async () => {
   const xs = new Set(ids.map(id => Math.round(objs[id].selrect.x)));
   assert.equal(xs.size, 2, `2 columns persisted (xs=${[...xs]})`);
 });
+
+test("WorkingCopy: add ellipse persists as circle", async () => {
+  const before = await getFile(env.fileId, env.token);
+  const beforeCount = Object.keys(before.raw.data.pagesIndex[before.pageId].objects).length;
+  const wc = await new WorkingCopy(env.fileId, env.token).checkout();
+  const id = wc.addEllipse({ x: 2000, y: 80, width: 100, height: 100, name: "Circle", fills: [{ fillColor: "#22c55e" }] });
+  assert.deepEqual(wc.validate(), []);
+  await wc.commit();
+  const after = await getFile(env.fileId, env.token);
+  const objs = after.raw.data.pagesIndex[after.pageId].objects;
+  assert.equal(Object.keys(objs).length, beforeCount + 1);
+  assert.equal(objs[id].type, "circle", "persisted as circle");
+});

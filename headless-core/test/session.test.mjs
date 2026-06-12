@@ -94,3 +94,12 @@ test("setGridLayout arranges children into a 2-column grid", () => {
   assert.equal(ys.size, 2, `2 distinct rows (ys=${[...ys]})`);
   assert.deepEqual(JSON.parse(s.validate()), []);
 });
+
+test("addEllipse creates a valid circle shape", () => {
+  const s = createSession(JSON.stringify({ empty: true }));
+  const id = s.addEllipse(JSON.stringify({ x: 10, y: 10, width: 120, height: 80, name: "Dot", fills: [{ fillColor: "#22c55e" }] }));
+  const objs = JSON.parse(s.objects());
+  assert.equal(objs[id].type, "circle");
+  assert.equal(objs[id].selrect.width, 120);
+  assert.deepEqual(JSON.parse(s.validate()), []);
+});

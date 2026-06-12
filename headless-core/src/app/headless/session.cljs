@@ -112,7 +112,8 @@
                               fid    (or (peek stack) root-frame)]
                           (assoc s :stack stack :frame-id fid))))
          js/undefined)
-       :addRect  (fn [json] (add-shape! state (mk-shape state :rect (args json))))
+       :addRect    (fn [json] (add-shape! state (mk-shape state :rect   (args json))))
+       :addEllipse (fn [json] (add-shape! state (mk-shape state :circle (args json))))
        :addText
        (fn [json]
          (let [{:keys [x y width height name characters fontSize fontId fills growType parentId]} (args json)
