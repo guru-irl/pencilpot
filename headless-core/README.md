@@ -315,7 +315,7 @@ See:
 | Tool | Description |
 |---|---|
 | `checkout` | Load a Penpot file into a headless working copy (`fileId` arg). Returns current `revn` and object count. |
-| `script` | Run a JS snippet against the working copy (`code` arg). Globals: `wc` (`addBoard`, `addRect`, `addEllipse`, `addText`, `closeBoard`, `setFlexLayout`, `validate`, `pendingChanges`). Many edits in one call; no network until `commit`. |
+| `script` | Run a JS snippet against the working copy (`code` arg). Globals: `wc` (`addBoard`, `addRect`, `addEllipse`, `addText`, `closeBoard`, `setFlexLayout`, `setGridLayout`, `setGrowType`, `setConstraints`, `validate`, `pendingChanges`). Many edits in one call; no network until `commit`. |
 | `scene` | Return the full working-copy object map (id → shape). |
 | `validate` | Run Penpot's own `validate-file-schema!` on the local state. Returns `[]` on success; error details otherwise. |
 | `status` | Pending (uncommitted) change count + current `revn`. |
@@ -409,6 +409,32 @@ wc.setGridLayout(b, { cols: 3, gap: 12, padding: 16 });
 await wc.commit();
 ```
 
+`setGrowType(id, mode)` sets the auto-sizing behaviour of a text shape. `mode` must be one
+of `"auto-width"` (default for new text), `"auto-height"`, or `"fixed"`. Emits a `:mod-obj`
+change via `pcb/update-shapes`.
+
+```js
+const t = wc.addText({ x: 10, y: 10, width: 200, height: 30, characters: "Hello" });
+wc.setGrowType(t, "fixed");    // lock size; editor won't resize on open
+await wc.commit();
+```
+
+`setConstraints(id, {h, v})` sets horizontal and/or vertical pinning constraints on any shape.
+Either key may be omitted to leave the existing constraint unchanged.
+
+| Key | Valid values |
+|---|---|
+| `h` | `"left"` `"right"` `"leftright"` `"center"` `"scale"` |
+| `v` | `"top"` `"bottom"` `"topbottom"` `"center"` `"scale"` |
+
+```js
+const b = wc.addBoard({ x: 0, y: 0, width: 200, height: 200, name: "Card" });
+const r = wc.addRect({ x: 10, y: 10, width: 50, height: 50, parentId: b });
+wc.closeBoard();
+wc.setConstraints(r, { h: "right", v: "bottom" });  // pin to bottom-right corner
+await wc.commit();
+```
+
 ### Environment variables
 
 | Variable | Required | Description |
@@ -496,6 +522,13 @@ The following remain out of scope:
 > **Phase 1c-2 (flex) complete:** `setFlexLayout()` is now implemented on `HeadlessSession`,
 > `WorkingCopy`, and the MCP `script` sandbox. Boards persist with `layout:"flex"` and
 > children are reflowed by Penpot's own modifier engine on commit.
+
+> **Phase 2 (fidelity) complete:** `setGrowType()` and `setConstraints()` are now implemented
+> on `HeadlessSession` and `WorkingCopy`. `setGrowType(id, "auto-width"|"auto-height"|"fixed")`
+> sets text shape auto-sizing behaviour. `setConstraints(id, {h, v})` sets horizontal and/or
+> vertical pinning constraints on any shape — values are validated against Penpot's own enums
+> (`constraints-h` ∈ `left|right|leftright|center|scale`; `constraints-v` ∈ `top|bottom|topbottom|center|scale`).
+> Both emit `:mod-obj` changes via `pcb/update-shapes` and are schema-validated before commit.
 
 > **Phase 1c-3 (`pp` CLI) complete:** `bin/pp.mjs` is implemented with `run` and `scene`
 > subcommands. `npm run test:cli` is wired into `npm run verify` as the final layer.
