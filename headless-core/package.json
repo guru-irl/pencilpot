@@ -9,9 +9,13 @@
     "test:unit": "node --test test/session.test.mjs test/facade.test.mjs",
     "test:engine": "node scripts/test-engine.mjs",
     "test:roundtrip": "node --test test/workingcopy.roundtrip.test.mjs",
-    "verify": "npm run build && npm run test:unit && npm run test:engine && npm run test:roundtrip"
+    "verify": "npm run build && npm run test:unit && npm run test:engine && npm run test:roundtrip",
+    "mcp": "node mcp/server.mjs",
+    "test:mcp": "node --test test/mcp-server.test.mjs"
   },
   "dependencies": {
-    "date-fns": "^4.1.0"
+    "@modelcontextprotocol/sdk": "^1.24.0",
+    "date-fns": "^4.1.0",
+    "zod": "^4.3.6"
   }
 }
