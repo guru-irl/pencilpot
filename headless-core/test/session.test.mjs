@@ -133,3 +133,31 @@ test("setConstraints sets horizontal + vertical constraints", () => {
   assert.equal(o[r]["constraints-v"], "bottom");
   assert.deepEqual(JSON.parse(s.validate()), []);
 });
+
+test("createComponent promotes a board to a main component", () => {
+  const s = createSession(JSON.stringify({ empty: true }));
+  const b = s.addBoard(JSON.stringify({ x: 0, y: 0, width: 200, height: 120, name: "Card" }));
+  s.addRect(JSON.stringify({ x: 10, y: 10, width: 80, height: 40, parentId: b }));
+  s.closeBoard();
+  const cid = s.createComponent(b, JSON.stringify({ name: "Card" }));
+  assert.equal(typeof cid, "string");
+  const o = JSON.parse(s.objects());
+  assert.equal(o[b]["main-instance"], true);
+  assert.equal(o[b]["component-id"], cid);
+  assert.equal(o[b]["component-root"], true);
+  assert.deepEqual(JSON.parse(s.validate()), []);
+});
+
+test("instantiateComponent creates a copy of a component", () => {
+  const s = createSession(JSON.stringify({ empty: true }));
+  const b = s.addBoard(JSON.stringify({ x: 0, y: 0, width: 200, height: 120, name: "Card" }));
+  s.addRect(JSON.stringify({ x: 10, y: 10, width: 80, height: 40, parentId: b }));
+  s.closeBoard();
+  const cid = s.createComponent(b, JSON.stringify({ name: "Card" }));
+  const copyId = s.instantiateComponent(cid, JSON.stringify({ x: 400, y: 0 }));
+  assert.equal(typeof copyId, "string");
+  const o = JSON.parse(s.objects());
+  assert.ok(o[copyId], "copy root exists");
+  assert.equal(o[copyId]["component-id"], cid);
+  assert.deepEqual(JSON.parse(s.validate()), []);
+});

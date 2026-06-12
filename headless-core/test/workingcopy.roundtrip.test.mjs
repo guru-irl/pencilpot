@@ -114,6 +114,33 @@ test("WorkingCopy: color token persists", async () => {
   assert.equal(typeof tokenId, "string");
 });
 
+test("WorkingCopy: promote board to component persists (server validates)", async () => {
+  const wc = await new WorkingCopy(env.fileId, env.token).checkout();
+  const b = wc.addBoard({ x: 2300, y: 80, width: 200, height: 120, name: "CompCard" });
+  wc.addRect({ x: 2310, y: 90, width: 80, height: 40, parentId: b });
+  wc.closeBoard();
+  const cid = wc.createComponent(b, { name: "CompCard" });
+  await wc.commit();  // server enforces component referential integrity
+  const after = await getFile(env.fileId, env.token);
+  const comps = after.raw.data.components ?? after.raw.data["components"] ?? {};
+  assert.ok(JSON.stringify(comps).includes(cid) || Object.keys(comps).includes(cid), "component persisted");
+});
+
+test("WorkingCopy: instantiate a component copy persists (server validates)", async () => {
+  const wc = await new WorkingCopy(env.fileId, env.token).checkout();
+  const b = wc.addBoard({ x: 2600, y: 80, width: 200, height: 120, name: "CompSrc" });
+  wc.addRect({ x: 2610, y: 90, width: 80, height: 40, parentId: b });
+  wc.closeBoard();
+  const cid = wc.createComponent(b, { name: "CompSrc" });
+  const copyId = wc.instantiateComponent(cid, { x: 2900, y: 80 });
+  assert.equal(typeof copyId, "string");
+  await wc.commit();  // server enforces copy referential integrity (shape-ref/component-*)
+  const after = await getFile(env.fileId, env.token);
+  const objs = after.raw.data.pagesIndex[after.pageId].objects;
+  assert.ok(objs[copyId], "copy root persisted");
+  assert.equal(objs[copyId].componentId ?? objs[copyId]["component-id"], cid, "copy references the component");
+});
+
 test("WorkingCopy: add ellipse persists as circle", async () => {
   const before = await getFile(env.fileId, env.token);
   const beforeCount = Object.keys(before.raw.data.pagesIndex[before.pageId].objects).length;

@@ -22,6 +22,9 @@ export class WorkingCopy {
   setGrowType(id, mode) { return this.session.setGrowType(id, mode); }
   setConstraints(id, opts) { return this.session.setConstraints(id, JSON.stringify(opts)); }
 
+  createComponent(boardId, opts = {}) { return this.session.createComponent(boardId, JSON.stringify(opts)); }
+  instantiateComponent(componentId, opts) { return this.session.instantiateComponent(componentId, JSON.stringify(opts)); }
+
   addColorToken(opts) { return this.session.addColorToken(JSON.stringify(opts)); }
   tokens() { return JSON.parse(this.session.tokens()); }
 

@@ -4,6 +4,8 @@
    [app.common.types.text :as txt]               ; change-text (text content + styles)
    [app.common.files.changes :as cfc]            ; process-changes (apply to file-data)
    [app.common.files.changes-builder :as pcb]    ; update-shapes -> :mod-obj diffs
+   [app.common.logic.libraries :as cll]          ; generate-instantiate-component
+   [app.common.geom.point :as gpt]               ; gpt/point (instance position)
    [app.common.types.shape.layout :as ctl]       ; grid cells (add-grid-column/assign-cells/reorder)
    [app.common.geom.modifiers :as gm]            ; set-objects-modifiers (layout engine)
    [app.common.types.modifiers :as ctm]          ; reflow-modifiers (seed)
@@ -96,6 +98,14 @@
                       (update :data cfc/process-changes redo false)
                       (update :changes into redo)))
     redo))
+
+;; Apply a RAW vector of change maps (e.g. hand-built :add-component/:mod-obj)
+;; to the working copy + record them, in order.
+(defn- apply-raw-changes! [state redo]
+  (swap! state #(-> %
+                    (update :data cfc/process-changes redo false)
+                    (update :changes into redo)))
+  redo)
 
 ;; --- the JS-facing session object ------------------------------------------
 (defn- make-session [state file-id features]
@@ -258,6 +268,48 @@
                                                  :value (:value t)
                                                  :type  (clojure.core/name (:type t))})))]
                (js/JSON.stringify (->plain-js {:sets set-names :tokens tokens}))))))
+       :createComponent
+       ;; Promote an existing BOARD (a :frame) into a main component.
+       ;; Mirrors files.builder/add-component: emit :add-component + :mod-obj,
+       ;; apply both in order, record. Returns the component id (stringified).
+       (fn [board-id json]
+         (let [{:keys [name]} (args json)
+               bid   (uuid/parse board-id)
+               pid   (:page-id @state)
+               cid   (uuid/next)
+               board (get (objects-of state) bid)
+               change1 {:type :add-component :id cid
+                        :name (or name (:name board)) :path ""
+                        :main-instance-id bid :main-instance-page pid}
+               change2 {:type :mod-obj :id bid :page-id pid
+                        :operations [{:type :set :attr :component-root :val true}
+                                     {:type :set :attr :main-instance :val true}
+                                     {:type :set :attr :component-id :val cid}
+                                     {:type :set :attr :component-file :val file-id}]}]
+           (apply-raw-changes! state [change1 change2])
+           (str cid)))
+       :instantiateComponent
+       ;; Instantiate a copy of an existing component at (x,y) using Penpot's
+       ;; own generator (cll/generate-instantiate-component), which produces the
+       ;; copy shapes carrying the required :shape-ref/:component-* for the
+       ;; server's referential-integrity validation. Returns the copy root id.
+       (fn [component-id json]
+         (let [{:keys [x y]} (args json)
+               cid       (uuid/parse component-id)
+               pid       (:page-id @state)
+               data      (:data @state)
+               page      (get-in data [:pages-index pid])
+               objects   (objects-of state)
+               libraries {file-id {:id file-id :data data}}
+               changes0  (-> (pcb/empty-changes nil pid)
+                             (pcb/with-page-id pid)
+                             (pcb/with-objects objects))
+               [new-shape changes]
+               (cll/generate-instantiate-component
+                changes0 objects file-id cid
+                (gpt/point (or x 0) (or y 0)) page libraries)]
+           (apply-changes! state changes)
+           (str (:id new-shape))))
        :objects  (fn [] (js/JSON.stringify (->plain-js (get-in (:data @state) [:pages-index (:page-id @state) :objects]))))
        :getShape (fn [id] (js/JSON.stringify (->plain-js (get-in (:data @state) [:pages-index (:page-id @state) :objects (uuid/uuid id)]))))
        :validate (fn []
