@@ -40,3 +40,18 @@ test("editing one shape rewrites exactly one page file (minimal diff)", () => {
   const changedPages = Object.keys(after).filter((f) => f.startsWith("pages/") && after[f] !== before[f]);
   assert.equal(changedPages.length, 1, "exactly one page .edn changed");
 });
+
+import { initProject, resolveProjectRoot, listDesigns } from "../store/project.mjs";
+
+test("initProject creates a git repo + shared/, and resolveProjectRoot walks up from a nested design dir", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "pp-proj-"));
+  initProject(root);
+  assert.ok(fs.existsSync(path.join(root, ".git")), "git initialized");
+  assert.ok(fs.existsSync(path.join(root, "shared")), "shared/ created");
+  const design = path.join(root, "home.penpot");
+  fs.mkdirSync(path.join(design, "pages"), { recursive: true });
+  fs.writeFileSync(path.join(design, "manifest.edn"), "{:id #uuid \"x\"}");
+  assert.equal(resolveProjectRoot(design), root, "resolves root from the design dir");
+  assert.equal(resolveProjectRoot(path.join(design, "pages")), root, "resolves root from a nested path");
+  assert.deepEqual(listDesigns(root).map((p) => path.basename(p)), ["home.penpot"], "lists designs, excludes shared/");
+});
