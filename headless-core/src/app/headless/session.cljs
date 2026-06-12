@@ -365,6 +365,8 @@
                params {:id file-id :session-id (uuid/parse sessionId)
                        :revn revn :vern vern :features (set features) :changes (:changes @state)}]
            (t/encode-str params)))
+       :bumpRevn
+       (fn [] (let [n (inc (:revn @state 0))] (swap! state assoc :revn n) n))
        :serializeStore
        ;; Returns JSON: {manifest:"<edn>", pages:{"<uuid>":"<edn>",...}, components:{...}, media:[...]}
        ;; The EDN is canonical (sorted keys, #uuid literals) and deterministic.
