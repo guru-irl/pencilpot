@@ -315,11 +315,9 @@ Commands:
   new <name|dir> [--design <d>]          Scaffold a new .pencil project (starter design included)
   open <path.pencil|dir> [--no-window]   Start the runtime and open the editor
                           [--port N]
-  import <file.penpot>                   Import a .penpot file as a design in a project
+  import <file.penpot>                   Import a .penpot file as a design (native, no backend)
          [--project <dir>]               Project directory (default: cwd)
          [--name <design>]               Design name (default: file basename)
-         [--instance <url>]              penpot-hl instance (default: http://localhost:9101)
-         [--token <tok>]                 Auth token (default: from infra/penpot-hl/test-env.json)
   install-desktop                         Install as a desktop app (Task D3)
   uninstall-desktop                       Remove the desktop app entry (Task D3)
   --help, -h                              Show this help
@@ -333,12 +331,12 @@ Examples:
 }
 
 // ---------------------------------------------------------------------------
-// import command
+// import command (native — no external backend)
 // ---------------------------------------------------------------------------
 async function cmdImport(positional, flags) {
   const filePath = positional[0];
   if (!filePath) {
-    console.error("Usage: pencilpot import <file.penpot> [--project <dir>] [--name <design>] [--instance <url>] [--token <tok>]");
+    console.error("Usage: pencilpot import <file.penpot> [--project <dir>] [--name <design>]");
     process.exit(1);
   }
 
@@ -365,38 +363,36 @@ async function cmdImport(positional, flags) {
   const baseName = path.basename(absFile, ".penpot");
   const designName = flags["name"] || baseName.toLowerCase().replace(/[^a-z0-9-_]/g, "-");
 
-  // penpot-hl connection params
-  const ENV_FILE = path.resolve(import.meta.dirname, "../../infra/penpot-hl/test-env.json");
-  let envCfg = {};
-  try { envCfg = JSON.parse(fs.readFileSync(ENV_FILE, "utf8")); } catch {}
-  const instance = flags["instance"] || process.env.PENPOT_HL_BASE || "http://localhost:9101";
-  const token    = flags["token"]    || envCfg.token || "";
-  const projectId = envCfg.projectId || "";
+  console.log(`importing ${absFile} → designs/${designName} (native, no backend)…`);
 
-  if (!token)     { console.error("No auth token — pass --token or ensure infra/penpot-hl/test-env.json exists"); process.exit(1); }
-  if (!projectId) { console.error("No projectId — ensure infra/penpot-hl/test-env.json exists"); process.exit(1); }
+  // Native conversion: unzip → engine decode/assemble → serialize to EDN store
+  const { importPenpot } = await import("../runtime/import-binfile.mjs");
+  const { parts, mediaFiles } = await importPenpot(absFile);
 
-  console.log(`importing ${absFile} → designs/${designName} (via ${instance})…`);
-
-  // Step 1: POST to import-binfile, get new file-id
-  const { importBinfile } = await import("../runtime/import-binfile.mjs");
-  const newFileId = await importBinfile(absFile, { instance, token, projectId, name: designName });
-  console.log(`  imported → file-id: ${newFileId}`);
-
-  // Step 2: fetch the file from penpot-hl
-  const { getFile } = await import("../../headless-core/sdk/rpc.mjs");
-  const { dataTransit, raw } = await getFile(newFileId, token);
-
-  // Step 3: hydrate + serialize via engine
-  const { createSession } = await import("../../headless-core/target/headless/penpot.js");
-  const s = createSession(JSON.stringify({ fromTransit: dataTransit, meta: raw }));
-  const parts = JSON.parse(s.serializeStore());
-
-  // Step 4: register + write to project
+  // Register + write design to project
   const designDir = addDesign(proj.root, designName);
   writeDesign(designDir, parts);
 
-  console.log(`imported ${path.basename(absFile)} → designs/${designName}`);
+  // Copy media binary files into designDir/media/
+  if (mediaFiles.length > 0) {
+    const mediaDir = path.join(designDir, "media");
+    fs.mkdirSync(mediaDir, { recursive: true });
+    for (const { id, srcPath, ext } of mediaFiles) {
+      const dest = path.join(mediaDir, `${id}.${ext}`);
+      try {
+        fs.copyFileSync(srcPath, dest);
+      } catch (e) {
+        console.warn(`  warning: could not copy media ${id}.${ext}: ${e.message}`);
+      }
+    }
+    console.log(`  copied ${mediaFiles.length} media file(s) → ${mediaDir}`);
+  }
+
+  // Summary
+  const pageCount = Object.keys(parts.pages || {}).length;
+  const compCount = Object.keys(parts.components || {}).length;
+  console.log(`imported ${path.basename(absFile)} → designs/${designName} (native, no backend)`);
+  console.log(`  pages: ${pageCount}  components: ${compCount}  media: ${mediaFiles.length}`);
 }
 
 // ---------------------------------------------------------------------------

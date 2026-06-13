@@ -2,13 +2,14 @@
   "Canonical-EDN serializer/deserializer for the pencilpot on-disk store.
 
   Lossless: keywords, #uuid literals, sets, and Penpot record types (e.g.
-  TokensLib) all survive the round-trip.
+  TokensLib, PathData) all survive the round-trip.
   Deterministic: sorted-map-by print-representation ensures byte-identical
   output when data is unchanged, keeping git diffs minimal."
   (:require
    [cljs.reader :as reader]
    [clojure.pprint :as pp]
    [app.common.uuid :as uuid]
+   [app.common.types.path :as path]
    [app.common.types.tokens-lib :as ctob]))
 
 ;; ---------------------------------------------------------------------------
@@ -54,13 +55,23 @@
   (when (some? v)
     (ctob/parse-multi-set-dtcg-json v)))
 
+(defn- edn-read-path-data
+  "EDN tag reader for #penpot/path-data.
+
+  The tagged value is the SVG path string (d= attribute style) written by
+  PathData's IPrintWithWriter.  We parse it back via path/from-string."
+  [v]
+  (when (and v (seq v))
+    (path/from-string v)))
+
 (defn read-edn
   "Parse an EDN string produced by `canonical-edn`.  Supports the #uuid
   tagged literal and all Penpot tagged literals that appear in file :data
-  (currently #penpot/tokens-lib)."
+  (#penpot/tokens-lib and #penpot/path-data)."
   [s]
   (reader/read-string {:readers {'uuid              uuid/uuid
-                                 'penpot/tokens-lib edn-read-tokens-lib}}
+                                 'penpot/tokens-lib edn-read-tokens-lib
+                                 'penpot/path-data  edn-read-path-data}}
                       s))
 
 ;; ---------------------------------------------------------------------------

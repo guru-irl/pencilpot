@@ -9,7 +9,8 @@
    {:penpot
     {:exports {buildAddBoardChange app.headless.core/build-add-board-change
                buildAddBoardBody   app.headless.core/build-add-board-body
-               createSession       app.headless.session/create-session}}}
+               createSession       app.headless.session/create-session
+               importBinfileV3     app.pencilpot.import/import-binfile-v3}}}
    :js-options {:entry-keys ["module" "browser" "main"]
                 :export-conditions ["module" "import" "browser" "require" "default"]}
    :compiler-options {:output-feature-set :es2020
