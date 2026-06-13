@@ -510,18 +510,6 @@
                 :key (dm/str "axis-" tag)
                 :title (axis-label axis)}
           [:span {:class (stl/css :variation-axis-label)} (axis-label axis)]
-          [:input {:class (stl/css :variation-axis-slider)
-                   :type "range"
-                   :min min
-                   :max max
-                   :step 1
-                   :value value
-                   :aria-label (axis-label axis)
-                   :on-change (fn [event]
-                                (let [v (d/parse-double (dom/get-target-val event))]
-                                  (when (some? v)
-                                    (handle-change tag v))))
-                   :on-blur on-blur}]
           [:> numeric-input*
            {:min min
             :max max

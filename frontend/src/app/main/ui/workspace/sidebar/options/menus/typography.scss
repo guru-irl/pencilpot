@@ -314,30 +314,23 @@
 }
 
 .variation-axis {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-xs);
-}
-
-.variation-axis-label {
-  @include t.use-typography("body-small");
-
-  inline-size: $sz-64;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--color-foreground-secondary);
-}
-
-.variation-axis-slider {
-  flex-grow: 1;
-  min-inline-size: 0;
-}
-
-.variation-axis-input {
   @extend %input-element;
   @include t.use-typography("body-small");
 
+  justify-content: space-between;
+  gap: var(--sp-xs);
+  padding-inline-start: var(--sp-s);
+}
+
+.variation-axis-label {
+  flex-grow: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.variation-axis-input {
+  flex-shrink: 0;
   inline-size: $sz-64;
 }
 
