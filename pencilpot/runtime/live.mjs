@@ -14,33 +14,46 @@ import path from "node:path";
 /** Debounce interval (ms): coalesce rapid file writes before emitting. */
 const DEBOUNCE_MS = 250;
 
-/** Suppression window (ms): ignore watcher events within this period after a
- *  self-write.  Must be longer than the slowest disk flush.  1.5 s is generous
- *  for any SSD, and short enough that a human edit seconds later still fires.*/
-const SELF_WRITE_WINDOW_MS = 1500;
+/** Settle period (ms): once a self-write starts, suppression stays active and is
+ *  EXTENDED by every fs event it causes; it clears only after this many ms of quiet.
+ *  This covers writes of ANY duration (a large design rewrites many page files over
+ *  several seconds), so the SPA's own save never reloads.  A genuine external edit
+ *  (after the self-write has settled) still reloads. */
+const SELF_WRITE_SETTLE_MS = 1500;
 
 /** SSE keepalive comment interval (ms).  Keeps the connection alive through
  *  proxies and prevents the browser from timing out. */
 const KEEPALIVE_MS = 20_000;
 
-// ── Shared self-write clock (module-level singleton) ────────────────────────
-// noteSelfWrite() updates this, createLiveWatcher() reads it.
-let _lastSelfWrite = 0;
+// ── Shared self-write state (module-level singleton) ────────────────────────
+// noteSelfWrite() starts a self-write; the watcher's isSelfWriteSuppressed()
+// reads (and extends) it so a multi-file write of any duration stays suppressed.
+let _selfWriting = false;
+let _settleTimer = null;
 
-/**
- * Note that a write was just performed by the SPA (via update-file).
- * Any fs-change detected within SELF_WRITE_WINDOW_MS will be suppressed.
- */
-export function noteSelfWrite() {
-  _lastSelfWrite = Date.now();
+function _armSettle() {
+  if (_settleTimer) clearTimeout(_settleTimer);
+  _settleTimer = setTimeout(() => { _selfWriting = false; _settleTimer = null; }, SELF_WRITE_SETTLE_MS);
 }
 
 /**
- * Returns true if the current moment is still inside the self-write
- * suppression window.
+ * Note that a write is being performed by the SPA (via update-file).
+ * Suppression stays active (and is extended by each resulting fs event) until
+ * the file activity goes quiet for SELF_WRITE_SETTLE_MS.
+ */
+export function noteSelfWrite() {
+  _selfWriting = true;
+  _armSettle();
+}
+
+/**
+ * True while a self-write is in progress.  When true, EXTENDS the settle window
+ * (each suppressed fs event pushes the clear-timer back), so even a slow,
+ * many-file write never leaks a reload event.
  */
 function isSelfWriteSuppressed() {
-  return Date.now() - _lastSelfWrite < SELF_WRITE_WINDOW_MS;
+  if (_selfWriting) { _armSettle(); return true; }
+  return false;
 }
 
 // ── Client set type ──────────────────────────────────────────────────────────
