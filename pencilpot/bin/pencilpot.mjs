@@ -38,7 +38,13 @@ function parseArgs(argv) {
       const key = a.slice(2);
       const next = args[i + 1];
       if (next !== undefined && !next.startsWith("--")) {
-        flags[key] = next;
+        // Accumulate multi-value flags (e.g. --family can appear multiple times)
+        if (key === "family") {
+          if (!Array.isArray(flags[key])) flags[key] = [];
+          flags[key].push(next);
+        } else {
+          flags[key] = next;
+        }
         i++;
       } else {
         flags[key] = true;
@@ -307,6 +313,151 @@ function cmdUninstallDesktop() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// retarget-fonts command — consolidate duplicate font-ids per family
+// ---------------------------------------------------------------------------
+async function cmdRetargetFonts(positional, flags) {
+  const arg = positional[0];
+  if (!arg) {
+    console.error("Usage: pencilpot retarget-fonts <project> [--family \"Name=fontId\" …] [--design <name>]");
+    process.exit(1);
+  }
+
+  const { resolveProject } = await import("../store/project.mjs");
+  const { readDesign, writeDesign } = await import("../store/store.mjs");
+  const { createSession } = await import("../../headless-core/target/headless/penpot.js");
+
+  let proj;
+  try {
+    proj = resolveProject(path.resolve(arg));
+  } catch (e) {
+    console.error(`Error resolving project: ${e.message}`);
+    process.exit(1);
+  }
+
+  // Resolve which design to operate on
+  const designName = flags["design"] || proj.default;
+  if (!designName) {
+    console.error("No default design and no --design flag. Use --design <name>.");
+    process.exit(1);
+  }
+  const designEntry = proj.designs.find((d) => d.name === designName);
+  if (!designEntry) {
+    console.error(`Design "${designName}" not found in project.`);
+    process.exit(1);
+  }
+  const designDir = designEntry.dir;
+
+  // Load design into engine
+  const storeParts = readDesign(designDir);
+  const session = createSession(JSON.stringify({ fromStore: storeParts }));
+
+  // Build the family → fontId mapping
+  let mapping; // { "Family Name": "new-font-id", ... }
+
+  const familyFlags = flags["family"]; // string[] | undefined
+  if (familyFlags && familyFlags.length > 0) {
+    // Explicit mode: --family "Name=fontId"
+    mapping = {};
+    for (const entry of familyFlags) {
+      const eqIdx = entry.indexOf("=");
+      if (eqIdx < 1) {
+        console.error(`Invalid --family value "${entry}" — expected "Family Name=font-id"`);
+        process.exit(1);
+      }
+      const name = entry.slice(0, eqIdx).trim();
+      const fontId = entry.slice(eqIdx + 1).trim();
+      mapping[name] = fontId;
+    }
+    console.log("Explicit font mapping:");
+    for (const [fam, id] of Object.entries(mapping)) {
+      console.log(`  "${fam}" → ${id}`);
+    }
+  } else {
+    // Auto-consolidate mode: detect families with >1 font-id in the design EDN
+    // Scan the serialised store's page EDN strings for :font-family / :font-id pairs
+    const pagesDir = path.join(designDir, "pages");
+    const familyToIds = {}; // { "Family Name": Set<string> }
+
+    const pageFiles = fs.existsSync(pagesDir)
+      ? fs.readdirSync(pagesDir).filter((f) => f.endsWith(".edn"))
+      : [];
+
+    // Also scan manifest (may contain typographies)
+    const allEdnFiles = [
+      ...pageFiles.map((f) => path.join(pagesDir, f)),
+      path.join(designDir, "manifest.edn"),
+    ];
+
+    for (const filePath of allEdnFiles) {
+      if (!fs.existsSync(filePath)) continue;
+      const edn = fs.readFileSync(filePath, "utf8");
+      // Find every :font-family occurrence, then look nearby for :font-id
+      const famRe = /:font-family\s+"([^"]+)"/g;
+      let m;
+      while ((m = famRe.exec(edn)) !== null) {
+        const fam = m[1];
+        if (fam.startsWith('"')) continue; // skip escaped \" artefacts
+        const start = Math.max(0, m.index - 300);
+        const end   = Math.min(edn.length, m.index + 300);
+        const ctx   = edn.slice(start, end);
+        const idM   = /:font-id\s+"([^"]+)"/.exec(ctx);
+        if (idM) {
+          if (!familyToIds[fam]) familyToIds[fam] = new Set();
+          familyToIds[fam].add(idM[1]);
+        }
+      }
+    }
+
+    // Auto-consolidation: families with >1 font-id
+    mapping = {};
+    let hasDupes = false;
+    for (const [fam, ids] of Object.entries(familyToIds)) {
+      if (ids.size > 1) {
+        hasDupes = true;
+        const slug = fam.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+        const canonicalId = `custom-${slug}`;
+        mapping[fam] = canonicalId;
+        console.log(`auto-consolidate: "${fam}" (${ids.size} ids: ${[...ids].join(", ")}) → ${canonicalId}`);
+      }
+    }
+
+    if (!hasDupes) {
+      console.log("No duplicate font-ids found per family — nothing to consolidate.");
+      process.exit(0);
+    }
+  }
+
+  if (Object.keys(mapping).length === 0) {
+    console.log("Empty mapping — nothing to do.");
+    process.exit(0);
+  }
+
+  // Baseline validation (pre-existing issues should not block the retarget)
+  const baselineErrs = JSON.parse(session.validate());
+
+  // Apply the retarget in the engine
+  session.retargetFonts(JSON.stringify(mapping));
+
+  // Validate post-retarget; warn if there are new errors (not present in baseline)
+  const postErrs = JSON.parse(session.validate());
+  const newErrs = postErrs.filter((e) => !baselineErrs.includes(e));
+  if (newErrs.length > 0) {
+    console.error("Validation introduced new errors after retargetFonts:");
+    for (const e of newErrs) console.error(" ", e);
+    process.exit(1);
+  }
+  if (baselineErrs.length > 0) {
+    console.warn(`  note: ${baselineErrs.length} pre-existing validation issue(s) unchanged (not caused by retarget)`);
+  }
+
+  // Persist
+  writeDesign(designDir, JSON.parse(session.serializeStore()));
+
+  console.log(`\nretarget-fonts complete — design "${designName}" updated.`);
+  console.log("Families rewritten:", Object.keys(mapping).join(", "));
+}
+
 function printHelp() {
   console.log(`
 pencilpot <command> [args] [--flags]
@@ -323,6 +474,9 @@ Commands:
   add-font <fontfile> [--project <dir>]  Add a custom font file to the project
            [--family <name>] [--weight 400] [--style normal] [--id <fontId>]
   fonts <path.pencil|dir>               List added fonts + report missing families
+  retarget-fonts <project> [--family "Name=fontId" …]
+                                         Rewrite every font-id ref in the design to a
+                                         canonical id per family (consolidates duplicates)
   install-desktop                         Install as a desktop app
   uninstall-desktop                       Remove the desktop app entry
   --help, -h                              Show this help
@@ -647,6 +801,9 @@ switch (cmd) {
     break;
   case "add-font":
     await cmdAddFont(positional, flags);
+    break;
+  case "retarget-fonts":
+    await cmdRetargetFonts(positional, flags);
     break;
   case "fonts":
     await cmdFonts(positional, flags);

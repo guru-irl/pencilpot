@@ -411,7 +411,12 @@
                                        "design-tokens/v1" "tokens/numeric-input" "variants/v1"
                                        "render-wasm/v1" "text-editor/v2" "text-editor-wasm/v1"}
                                      (map str (or features [])))
-               meta-m   {:id       (str file-id)
+               ;; NOTE: :id must be a proper UUID (not a string) so that transit encodes it
+               ;; as ~u<uuid-str> — the SPA stores the file in state keyed by UUID, and
+               ;; workspace-content* reads (:id file) to derive file-id for child components.
+               ;; A String :id causes map-key mismatch → objects lookup returns nil → design
+               ;; panel shows no shape properties.
+               meta-m   {:id       file-id
                          :name     nm
                          :revn     revn
                          :vern     vern
@@ -425,7 +430,28 @@
                               (assoc :features served-features))
                           (assoc meta-m :data data))
                body     (t/encode-str resp)]
-           (js/JSON.stringify (clj->js {:meta meta-m :transit body}))))})
+           (js/JSON.stringify (clj->js {:meta meta-m :transit body}))))
+       :retargetFonts
+       (fn [mapping-json]
+         ;; Walk EVERY map in the file data; for any node that has :font-family
+         ;; matching a key in `mapping`, rewrite :font-id and :font-variant-id.
+         ;; Covers text shapes (shape-level attrs + nested content tree) and typographies.
+         (let [mapping (js->clj (js/JSON.parse mapping-json))
+               ;; mapping: {"Family Name" "new-font-id", ...}
+               transform-node
+               (fn [node]
+                 (if (and (map? node) (contains? node :font-family))
+                   (let [fam    (:font-family node)
+                         new-id (get mapping fam)]
+                     (if new-id
+                       (let [weight (or (:font-weight node) "400")]
+                         (assoc node
+                           :font-id         new-id
+                           :font-variant-id (str "normal-" weight)))
+                       node))
+                   node))]
+           (swap! state update :data (fn [d] (walk/postwalk transform-node d)))
+           js/undefined))})
 
 (defn ^:export create-session
   "args-json: either {empty:true,name} for a fresh file,

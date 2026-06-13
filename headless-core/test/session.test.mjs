@@ -176,3 +176,63 @@ test("instantiateComponent creates a copy of a component", () => {
   assert.equal(o[copyId]["component-id"], cid);
   assert.deepEqual(JSON.parse(s.validate()), []);
 });
+
+test("retargetFonts rewrites font-id + font-variant-id for matching families", () => {
+  const s = createSession(JSON.stringify({ empty: true }));
+  // Add a text shape with a specific fontId/family so we can verify the rewrite
+  const id = s.addText(JSON.stringify({
+    x: 0, y: 0, width: 200, height: 30,
+    characters: "Hello font retarget",
+    fontId: "custom-old-id",
+  }));
+
+  // Inject font-family into the shape via applyChanges (simulates an imported design
+  // that has :font-family set on text content nodes and shape-level attrs).
+  s.applyChanges(JSON.stringify([
+    {
+      type: "mod-obj",
+      id: id,
+      operations: [
+        { type: "set", attr: "font-family", val: "TestFamily" },
+        { type: "set", attr: "font-id",     val: "custom-old-id" },
+        { type: "set", attr: "font-weight",  val: "700" },
+      ],
+    },
+  ]));
+
+  // retargetFonts: map "TestFamily" → "custom-new-id"
+  s.retargetFonts(JSON.stringify({ "TestFamily": "custom-new-id" }));
+
+  const objs2 = JSON.parse(s.objects());
+  const shape2 = objs2[id];
+  assert.equal(shape2["font-id"], "custom-new-id",
+    `font-id should be rewritten to custom-new-id, got ${shape2["font-id"]}`);
+  assert.equal(shape2["font-variant-id"], "normal-700",
+    `font-variant-id should be normal-700, got ${shape2["font-variant-id"]}`);
+
+  // validate still passes
+  assert.deepEqual(JSON.parse(s.validate()), [],
+    "file should still be valid after retargetFonts");
+});
+
+test("retargetFonts leaves non-matching families untouched", () => {
+  const s = createSession(JSON.stringify({ empty: true }));
+  const id = s.addText(JSON.stringify({ x: 0, y: 0, width: 200, height: 30, characters: "Keep me" }));
+  s.applyChanges(JSON.stringify([{
+    type: "mod-obj",
+    id: id,
+    operations: [
+      { type: "set", attr: "font-family", val: "OtherFamily" },
+      { type: "set", attr: "font-id",     val: "custom-other" },
+      { type: "set", attr: "font-weight",  val: "400" },
+    ],
+  }]));
+
+  // mapping does NOT include "OtherFamily"
+  s.retargetFonts(JSON.stringify({ "SomeFamily": "custom-some" }));
+
+  const shape = JSON.parse(s.objects())[id];
+  assert.equal(shape["font-id"], "custom-other",
+    "non-matching family must not be touched");
+  assert.deepEqual(JSON.parse(s.validate()), []);
+});
