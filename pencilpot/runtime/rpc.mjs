@@ -3,7 +3,7 @@
 import path from "node:path";
 import { createSession } from "../../headless-core/target/headless/penpot.js";
 import { readDesign, writeDesign } from "../store/index.mjs";
-import { resolveProjectRoot } from "../store/project.mjs";
+import { resolveProjectRoot, resolveProject } from "../store/project.mjs";
 import { readBody } from "./proxy.mjs";
 import { stub, isStub, buildUpdateFileResponse } from "./stubs.mjs";
 
@@ -169,7 +169,7 @@ export async function handleRpc(req, res, cfg) {
     const reqId = qp(req.url, "id");
     let serveDir = cfg.design;
     if (reqId && cfg.design) {
-      const projectRoot = resolveProjectRoot(cfg.design);
+      const projectRoot = cfg.project ?? resolveProjectRoot(cfg.design);
       const libRefs = parseLibrariesFromManifest(readDesign(cfg.design).manifest);
       const ref = libRefs.find(({ id }) => id === reqId);
       if (ref) serveDir = path.join(projectRoot, ref.path);
@@ -201,7 +201,7 @@ export async function handleRpc(req, res, cfg) {
       res.end("[]");
       return;
     }
-    const projectRoot = resolveProjectRoot(cfg.design);
+    const projectRoot = cfg.project ?? resolveProjectRoot(cfg.design);
     const libs = getFileLibraries(cfg.design, projectRoot);
     res.writeHead(200, {
       "content-type": "application/transit+json",

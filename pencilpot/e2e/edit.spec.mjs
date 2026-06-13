@@ -6,7 +6,7 @@ import path from "node:path";
 const WS = "#/workspace?team-id=0398e5fc-95c9-80d6-8008-29071f0fdaed&file-id=0398e5fc-95c9-80d6-8008-29088f3ee53a";
 
 // DESIGN is relative to the pencilpot/ dir (process.cwd() when running npx playwright test from pencilpot/).
-const DESIGN = path.join(process.cwd(), ".scratch", "proj", "home.penpot");
+const DESIGN = path.join(process.cwd(), ".scratch", "proj", "designs", "home");
 
 function revn() {
   const txt = fs.readFileSync(path.join(DESIGN, "manifest.edn"), "utf8");

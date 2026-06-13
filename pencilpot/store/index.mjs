@@ -1,2 +1,9 @@
 export { writeDesign, readDesign } from "./store.mjs";
-export { initProject, resolveProjectRoot, listDesigns } from "./project.mjs";
+export {
+  initProject,
+  addDesign,
+  readProject,
+  resolveProject,
+  resolveProjectRoot,
+  listDesigns,
+} from "./project.mjs";

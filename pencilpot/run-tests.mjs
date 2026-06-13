@@ -34,8 +34,9 @@ const BUNDLE    = path.join(ROOT, "frontend/resources/public/index.html");
 const HL_BASE   = process.env.PENPOT_HL_BASE ?? "http://localhost:9101";
 const RT_PORT   = process.env.PENCILPOT_PORT ?? "7777";
 const RT_BASE   = `http://localhost:${RT_PORT}`;
-const SCRATCH   = path.join(HERE, ".scratch", "proj");
-const DESIGN    = path.join(SCRATCH, "home.penpot");
+const SCRATCH      = path.join(HERE, ".scratch", "proj");
+const PENCIL_FILE  = path.join(SCRATCH, "demo.pencil");
+const DESIGN_DIR   = path.join(SCRATCH, "designs", "home");
 
 const args = process.argv.slice(2);
 const UNIT_ONLY    = args.includes("--unit");
@@ -137,8 +138,7 @@ async function runE2eTier() {
         env: {
           ...process.env,
           PENCILPOT_PORT:    RT_PORT,
-          PENCILPOT_PROJECT: SCRATCH,
-          PENCILPOT_DESIGN:  DESIGN,
+          PENCILPOT_PROJECT: PENCIL_FILE,
         },
       }
     );
@@ -239,6 +239,7 @@ async function main() {
     const files = [
       path.join(HC,   "test/store.test.mjs"),
       path.join(HERE, "test/store.test.mjs"),
+      path.join(HERE, "test/project.test.mjs"),
     ];
     console.log(col("cyan", col("bold", "\n▶ tier: unit")));
     const stats = runNodeTier(files);

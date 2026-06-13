@@ -4,14 +4,15 @@ import fs from "node:fs";
 import path from "node:path";
 import { getFile } from "../../headless-core/sdk/rpc.mjs";
 import { createSession } from "../../headless-core/target/headless/penpot.js";
-import { initProject } from "../store/project.mjs";
+import { initProject, addDesign } from "../store/project.mjs";
 import { writeDesign } from "../store/store.mjs";
 
 const env = JSON.parse(fs.readFileSync(new URL("../../infra/penpot-hl/test-env.json", import.meta.url)));
 const root = path.join(process.cwd(), ".scratch", "proj");
 
 fs.rmSync(root, { recursive: true, force: true });
-initProject(root);
+initProject(root, "demo");
+const designDir = addDesign(root, "home");
 
 console.log("fetching file", env.fileId, "from penpot-hl...");
 const f = await getFile(env.fileId, env.token);   // { dataTransit, raw:{...meta} }
@@ -20,7 +21,6 @@ console.log("fetched: revn=%d vern=%d features=%d pages=%d",
   (f.raw?.data?.pages || []).length || "?");
 
 const s = createSession(JSON.stringify({ fromTransit: f.dataTransit, meta: f.raw }));
-const designDir = path.join(root, "home.penpot");
 const parts = JSON.parse(s.serializeStore());
 
 // Report fidelity metrics
