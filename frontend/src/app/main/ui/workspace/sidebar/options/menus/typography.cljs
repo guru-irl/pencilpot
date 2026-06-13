@@ -456,9 +456,89 @@
                         :value "lowercase"
                         :id "text-transform-lowercase"}]]]))
 
+(defn- axis-label
+  "Human readable label for a variable-font axis (falls back to the tag)."
+  [{:keys [name tag]}]
+  (or (when-not (str/blank? name) name) tag))
+
+(defn- axis-current-value
+  "Resolve the current value for a given axis from the shape's
+  `:font-variation-settings`, falling back to the axis default and -- for the
+  `wght` axis -- to the currently selected `:font-weight`."
+  [{:keys [tag default] :as _axis} variation-settings font-weight]
+  (let [from-settings (when (map? variation-settings)
+                        (get variation-settings tag))]
+    (cond
+      (some? from-settings) from-settings
+
+      (and (= tag "wght") (some? font-weight) (not= :multiple font-weight))
+      (or (d/parse-double font-weight) default)
+
+      :else default)))
+
+(mf/defc font-variation-options
+  {::mf/wrap-props false}
+  [{:keys [values on-change on-blur axes]}]
+  (let [variation-settings (let [vs (:font-variation-settings values)]
+                             (when (map? vs) vs))
+        font-weight        (:font-weight values)
+
+        handle-change
+        (mf/use-fn
+         (mf/deps on-change axes variation-settings)
+         (fn [tag new-value]
+           (let [;; Start from the existing (explicit) overrides so unrelated
+                 ;; axes are preserved untouched.
+                 base    (or variation-settings {})
+                 ;; Drop axes that equal their default to keep the map minimal,
+                 ;; but always keep the axis the user is currently changing.
+                 updated (reduce
+                          (fn [acc {:keys [tag default] :as _axis}]
+                            (let [v (get acc tag)]
+                              (if (and (some? v) (= v default))
+                                (dissoc acc tag)
+                                acc)))
+                          (assoc base tag new-value)
+                          axes)]
+             (on-change {:font-variation-settings updated}))))]
+
+    [:div {:class (stl/css :variation-options)}
+     [:span {:class (stl/css :variation-title)} "Variable axes"]
+     (for [{:keys [tag min max] :as axis} axes]
+       (let [value (axis-current-value axis variation-settings font-weight)]
+         [:div {:class (stl/css :variation-axis)
+                :key (dm/str "axis-" tag)
+                :title (axis-label axis)}
+          [:span {:class (stl/css :variation-axis-label)} (axis-label axis)]
+          [:input {:class (stl/css :variation-axis-slider)
+                   :type "range"
+                   :min min
+                   :max max
+                   :step 1
+                   :value value
+                   :aria-label (axis-label axis)
+                   :on-change (fn [event]
+                                (let [v (d/parse-double (dom/get-target-val event))]
+                                  (when (some? v)
+                                    (handle-change tag v))))
+                   :on-blur on-blur}]
+          [:> numeric-input*
+           {:min min
+            :max max
+            :step 1
+            :class (stl/css :variation-axis-input)
+            :aria-label (axis-label axis)
+            :value (str value)
+            :on-change #(handle-change tag %)
+            :on-blur on-blur}]]))]))
+
 (mf/defc text-options*
   [{:keys [ids editor values on-change on-blur show-recent]}]
   (let [full-size-selector? (and show-recent (= (mf/use-ctx ctx/sidebar) :right))
+        fonts               (mf/deref fonts/fontsdb)
+        font                (get fonts (or (:font-id values)
+                                           (:font-id txt/default-typography)))
+        axes                (:axes font)
         opts #js {:editor editor
                   :ids ids
                   :values values
@@ -471,7 +551,13 @@
      [:> font-options opts]
      [:div {:class (stl/css :typography-variations)}
       [:> spacing-options opts]
-      [:> text-transform-options opts]]]))
+      [:> text-transform-options opts]]
+     (when (seq axes)
+       [:> font-variation-options
+        {:values values
+         :on-change on-change
+         :on-blur on-blur
+         :axes axes}])]))
 
 (mf/defc typography-advanced-options
   {::mf/wrap [mf/memo]}

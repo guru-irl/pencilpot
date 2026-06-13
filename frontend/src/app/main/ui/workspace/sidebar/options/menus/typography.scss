@@ -300,6 +300,47 @@
   background-color: var(--color-background-tertiary);
 }
 
+.variation-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xs);
+  margin-block-start: var(--sp-s);
+}
+
+.variation-title {
+  @include t.use-typography("body-small");
+
+  color: var(--color-foreground-secondary);
+}
+
+.variation-axis {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-xs);
+}
+
+.variation-axis-label {
+  @include t.use-typography("body-small");
+
+  inline-size: $sz-64;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-foreground-secondary);
+}
+
+.variation-axis-slider {
+  flex-grow: 1;
+  min-inline-size: 0;
+}
+
+.variation-axis-input {
+  @extend %input-element;
+  @include t.use-typography("body-small");
+
+  inline-size: $sz-64;
+}
+
 .font-size-select {
   @include t.use-typography("body-small");
 

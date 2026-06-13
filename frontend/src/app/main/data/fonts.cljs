@@ -37,29 +37,42 @@
   [fonts]
   (letfn [;; Prepare font to the internal font database format.
           (prepare-font [[id [item :as items]]]
-            {:id id
-             :name (:font-family item)
-             :family (:font-family item)
-             :variants (->> items
-                            (map prepare-font-variant)
-                            (sort-by variant-sort-fn)
-                            (vec))})
+            (let [variants (->> items
+                                (map prepare-font-variant)
+                                (sort-by variant-sort-fn)
+                                (vec))
+                  ;; A font is "variable" when any of its fetched variants carries
+                  ;; OpenType axis metadata. Hoist that metadata onto the font
+                  ;; record so the typography UI can render axis controls.
+                  axes-variant (d/seek (comp seq :axes) variants)]
+              (cond-> {:id id
+                       :name (:font-family item)
+                       :family (:font-family item)
+                       :variants variants}
+                (some? axes-variant)
+                (assoc :variable true
+                       :axes (:axes axes-variant)
+                       :instances (:instances axes-variant)))))
 
           (variant-sort-fn [item]
             [(:weight item)
              (if (= "normal" (:style item)) 1 2)])
 
           (prepare-font-variant [item]
-            {:id (str (:font-style item) "-" (:font-weight item))
-             :name (cm/font-display-variant (:variant-name item)
-                                            (:font-weight item)
-                                            (:font-style item))
-             :style (:font-style item)
-             :weight (str (:font-weight item))
-             ::fonts/woff1-file-id (:woff1-file-id item)
-             ::fonts/woff2-file-id (:woff2-file-id item)
-             ::fonts/ttf-file-id (:ttf-file-id item)
-             ::fonts/otf-file-id (:otf-file-id item)})
+            (cond-> {:id (str (:font-style item) "-" (:font-weight item))
+                     :name (cm/font-display-variant (:variant-name item)
+                                                    (:font-weight item)
+                                                    (:font-style item))
+                     :style (:font-style item)
+                     :weight (str (:font-weight item))
+                     ::fonts/woff1-file-id (:woff1-file-id item)
+                     ::fonts/woff2-file-id (:woff2-file-id item)
+                     ::fonts/ttf-file-id (:ttf-file-id item)
+                     ::fonts/otf-file-id (:otf-file-id item)}
+              ;; Variable-font metadata emitted by the get-font-variants RPC.
+              (:variable item) (assoc :variable true)
+              (seq (:axes item)) (assoc :axes (vec (:axes item)))
+              (seq (:instances item)) (assoc :instances (vec (:instances item)))))
 
           (adapt-font-id [variant]
             (update variant :font-id #(str "custom-" %)))]
