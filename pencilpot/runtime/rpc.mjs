@@ -171,10 +171,12 @@ function encodeTransitLibraryList(libs) {
  */
 function encodeTransitFontVariants(variants) {
   const arr = variants.map(({ id, fontId, family, weight, style, format }) => {
-    const woff2 = format === "woff2" ? id : null;
-    const woff1 = format === "woff1" ? id : null;
-    const ttf   = format === "ttf"   ? id : null;
-    const otf   = format === "otf"   ? id : null;
+    // Penpot's custom-font @font-face builds its URL from :woff1-file-id (see
+    // fonts.cljs generate-custom-font-variant-css).  We only ever have one file
+    // per variant, served by /assets/by-id/<id> with the correct content-type, so
+    // point ALL the *-file-id slots at the same id — whichever the loader reads,
+    // the URL resolves to the real file (the browser sniffs the actual format).
+    const woff2 = id, woff1 = id, ttf = id, otf = id;
     return [
       "^ ",
       "~:id",           id,
