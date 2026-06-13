@@ -30,6 +30,7 @@ const ROOT = path.resolve(HERE, "..");                           // repo root
 const HC   = path.join(ROOT, "headless-core");                   // headless-core/
 const ARTIFACT  = path.join(HC, "target/headless/penpot.js");
 const ENV_FILE  = path.join(ROOT, "infra/penpot-hl/test-env.json");
+const BUNDLE    = path.join(ROOT, "frontend/resources/public/index.html");
 const HL_BASE   = process.env.PENPOT_HL_BASE ?? "http://localhost:9101";
 const RT_PORT   = process.env.PENCILPOT_PORT ?? "7777";
 const RT_BASE   = `http://localhost:${RT_PORT}`;
@@ -192,7 +193,7 @@ async function runE2eTier() {
   }
 }
 
-// ── LOUD skip block ───────────────────────────────────────────────────────────
+// ── LOUD skip block (penpot-hl not live) ─────────────────────────────────────
 function loudSkipE2e(reason) {
   const line = "═".repeat(72);
   console.log(col("yellow", `\n${line}`));
@@ -200,6 +201,16 @@ function loudSkipE2e(reason) {
   console.log(col("yellow", `     reason: ${reason}`));
   console.log(col("yellow", "     penpot-hl :9101 not reachable — run `penpot start`"));
   console.log(col("yellow", "     (or `npm run test:e2e` / `node run-tests.mjs --live` to FAIL instead)"));
+  console.log(col("yellow", `${line}\n`));
+}
+
+// ── LOUD skip block (frontend bundle not built) ───────────────────────────────
+function loudSkipE2eBundle() {
+  const line = "═".repeat(72);
+  console.log(col("yellow", `\n${line}`));
+  console.log(col("yellow", col("bold", "  ⚠  SKIPPED e2e — frontend bundle not built")));
+  console.log(col("yellow", `     Missing: frontend/resources/public/index.html`));
+  console.log(col("yellow", "     Build it first — see docs/pencilpot/architecture/02-frontend-build.md"));
   console.log(col("yellow", `${line}\n`));
 }
 
@@ -247,7 +258,11 @@ async function main() {
 
   // ── e2e tier ─────────────────────────────────────────────────────────────────
   if (!UNIT_ONLY) {
-    if (!liveAvailable) {
+    const bundleExists = existsSync(BUNDLE);
+    if (!bundleExists) {
+      loudSkipE2eBundle();
+      results.push({ name: "e2e", status: "skipped" });
+    } else if (!liveAvailable) {
       loudSkipE2e(liveReason);
       results.push({ name: "e2e", status: "skipped" });
     } else {
@@ -283,7 +298,12 @@ async function main() {
   console.log(line);
   console.log(`  wall-time: ${(wallMs / 1000).toFixed(2)}s`);
   if (anySkipped) {
-    console.log(col("yellow", col("bold", "  ⚠  e2e SKIPPED — not a full green. Bring up penpot-hl :9101.")));
+    const bundleExists = existsSync(BUNDLE);
+    if (!bundleExists) {
+      console.log(col("yellow", col("bold", "  ⚠  e2e SKIPPED — build the frontend bundle (see docs/pencilpot/architecture/02-frontend-build.md).")));
+    } else {
+      console.log(col("yellow", col("bold", "  ⚠  e2e SKIPPED — not a full green. Bring up penpot-hl :9101.")));
+    }
   }
   console.log(col("bold", line));
 

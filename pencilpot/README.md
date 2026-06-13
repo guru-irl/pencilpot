@@ -2,7 +2,9 @@
 
 Local, filesystem-native Penpot design IDE. No JVM, no Postgres, no auth — the stock Penpot SPA designer runs against an EDN git-native store served by a lightweight Node HTTP server.
 
-Phase 1 (this directory): EDN exploded store + local runtime server. See `docs/pencilpot/architecture/01-runtime-store.md` for the full architecture note.
+Phase 1: EDN exploded store + local runtime server. See `docs/pencilpot/architecture/01-runtime-store.md`.
+
+Phase 2: runtime serves our own frontend bundle (no penpot-hl for assets); CLJS auth/dashboard/collab layer deleted; boots directly into the designer. See `docs/pencilpot/architecture/03-frontend-strip.md`.
 
 ---
 
@@ -41,12 +43,14 @@ npm run test:e2e     # require penpot-hl; fail preflight if down
 
 | File | Purpose | Key exports | Deps |
 |---|---|---|---|
-| `server.mjs` | HTTP server entry point. Reads `PENCILPOT_PORT` (default 7777), `PENCILPOT_PROJECT`, `PENCILPOT_DESIGN`. Routes `/api/*` to `rpc.mjs`; everything else to `proxy.mjs`. | (run directly) | `node:http`, `proxy.mjs`, `rpc.mjs` |
+| `server.mjs` | HTTP server entry point. Reads `PENCILPOT_PORT` (default 7777), `PENCILPOT_PROJECT`, `PENCILPOT_DESIGN`. Routes `/api/*` to `rpc.mjs`; everything else to `static.mjs`. | (run directly) | `node:http`, `static.mjs`, `proxy.mjs` (ws stub only), `rpc.mjs` |
+| `static.mjs` | *(Phase 2)* Serves `frontend/resources/public/` for all non-API requests. Intercepts `/js/config.js` and returns the runtime-injected body from `frontend.mjs`. Path-traversal guarded. | `serveStatic(req, res, cfg)` | `node:fs`, `frontend.mjs` |
+| `frontend.mjs` | *(Phase 2)* Resolves the dist directory and generates the runtime-injected `config.js` body (sets `penpotPublicURI`, `penpotFlags`, `window.pencilpotFile`). | `distDir()`, `configJs(opts)` | `node:path` |
 | `rpc.mjs` | RPC handler table. `get-file`/`update-file`/`get-file-libraries` from disk; all others via `stubs.mjs`. | `getFile(dir)`, `updateFile(dir, body)`, `updateFileJson(dir, json)`, `getFileLibraries(designDir, root)`, `handleRpc(req, res, cfg)` | headless engine, `store/index.mjs`, `stubs.mjs` |
-| `proxy.mjs` | Reverse-proxy to penpot-hl for static assets. Injects `penpotPublicURI = location.origin` into `/js/config.js` so the SPA routes all RPC calls to `:7777`. Provides WebSocket stub for `/ws/notifications`. | `proxyHttp(req, res)`, `attachWsStub(server)`, `readBody(req)` | `ws` |
-| `stubs.mjs` | Replay verbatim recorded boot responses from `stub-data/` (get-profile, get-teams, etc.). Returns `[]` for get-enabled-flags regardless of the recording. | `isStub(cmd)`, `stub(cmd, res)` | `node:fs` |
+| `proxy.mjs` | *Legacy (Phase 1 asset proxy — no longer used for static assets in Phase 2).* Still exports `readBody(req)` (used by `rpc.mjs`) and `attachWsStub(server)` (used by `server.mjs`). | `readBody(req)`, `attachWsStub(server)` | `ws` |
+| `stubs.mjs` | Replay verbatim recorded boot responses from `stub-data/` for workspace endpoints still called by the SPA. Auth/dashboard stubs pruned in Phase 2. | `isStub(cmd)`, `stub(cmd, res)` | `node:fs` |
 | `launch.mjs` | Programmatic launcher used by the headless SDK integration. | `launch(opts)` | `node:child_process` |
-| `stub-data/` | Recorded boot RPC responses copied from Phase 0. Each command has `<cmd>.body` + `<cmd>.meta.json`. | — | — |
+| `stub-data/` | Recorded workspace RPC responses (Phase 0 recordings). Pruned in Phase 2: `get-profile`, `get-projects`, `get-team-recent-files`, `get-file-libraries` stubs removed. | — | — |
 
 ### `scripts/`
 
@@ -66,6 +70,9 @@ npm run test:e2e     # require penpot-hl; fail preflight if down
 
 | File | What it tests |
 |---|---|
+| `own-bundle.spec.mjs` | *(Phase 2)* Our self-built bundle serves the workspace; zero requests hit penpot-hl:9101 |
+| `boot-direct.spec.mjs` | *(Phase 2)* Root `/` lands in workspace without any `get-profile` call; no `/ws/notifications` WebSocket opened |
+| `no-auth.spec.mjs` | *(Phase 2)* `/#/auth/login` renders no login form and does not keep the `/auth/login` URL |
 | `boot.spec.mjs` | Canvas loads from EDN store; `x-pencilpot-source: disk` header present on `get-file` |
 | `edit.spec.mjs` | Canvas edit (select-all + arrow nudge) triggers `update-file`; manifest `:revn` increments; survives reload |
 | `library.spec.mjs` | Spins up its own runtime server on `:7779` with a temp project containing a shared library; asserts `get-file-libraries` is served from disk and the response is non-empty |
@@ -73,4 +80,8 @@ npm run test:e2e     # require penpot-hl; fail preflight if down
 
 ### `run-tests.mjs`
 
-Tiered test runner. Unit + integration always run; e2e runs only when penpot-hl `:9101` is reachable and `infra/penpot-hl/test-env.json` exists. Missing live env produces a LOUD bordered skip (not a failure). Manages the e2e server lifecycle (spawn, readiness poll, teardown) and prints a summary table with per-tier counts and wall-time.
+Tiered test runner. Unit + integration always run. e2e tier has two preflight gates (Phase 2):
+1. `frontend/resources/public/index.html` must exist — if missing, e2e is LOUDLY skipped with a pointer to `docs/pencilpot/architecture/02-frontend-build.md` (no auto-build attempt).
+2. penpot-hl must be reachable at `:9101` and `infra/penpot-hl/test-env.json` must exist — if missing, e2e is LOUDLY skipped.
+
+Both missing conditions produce a bordered warning (not a failure). Manages the e2e server lifecycle (spawn, readiness poll, teardown) and prints a summary table with per-tier counts and wall-time.
