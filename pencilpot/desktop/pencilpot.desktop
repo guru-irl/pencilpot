@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Pencilpot
+GenericName=Design IDE
+Comment=Local filesystem-native design IDE
+Exec=__PENCILPOT_BIN__ open %f
+Terminal=false
+Categories=Graphics;Development;
+MimeType=application/x-pencil;
+StartupNotify=true
+StartupWMClass=localhost

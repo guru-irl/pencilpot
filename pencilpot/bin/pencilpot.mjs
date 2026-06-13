@@ -10,6 +10,7 @@
  */
 
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { spawn, execFileSync } from "node:child_process";
 import { createServer } from "node:net";
@@ -195,11 +196,103 @@ async function cmdOpen(positional, flags) {
 }
 
 function cmdInstallDesktop() {
-  console.log("install-desktop: implemented in Task D3");
+  const HOME = process.env.HOME || os.homedir();
+  const binDir        = path.join(HOME, ".local", "bin");
+  const mimeDir       = path.join(HOME, ".local", "share", "mime", "packages");
+  const appsDir       = path.join(HOME, ".local", "share", "applications");
+  const binLink       = path.join(binDir, "pencilpot");
+  const mimeTarget    = path.join(mimeDir, "pencilpot.xml");
+  const desktopTarget = path.join(appsDir, "pencilpot.desktop");
+
+  // Resolve absolute path to this script
+  const thisBin = path.resolve(import.meta.filename);
+
+  // Ensure the bin is executable
+  try { fs.chmodSync(thisBin, 0o755); } catch (e) {
+    console.warn(`  warning: could not chmod +x ${thisBin}: ${e.message}`);
+  }
+
+  // 1. Symlink ~/.local/bin/pencilpot → this script
+  fs.mkdirSync(binDir, { recursive: true });
+  try { fs.unlinkSync(binLink); } catch {}
+  fs.symlinkSync(thisBin, binLink);
+  console.log(`  installed symlink: ${binLink} → ${thisBin}`);
+
+  // Check PATH
+  const pathDirs = (process.env.PATH || "").split(":");
+  if (!pathDirs.includes(binDir)) {
+    console.log(`  NOTE: ${binDir} is not on PATH — add it to your shell profile.`);
+  }
+
+  // 2. MIME type
+  fs.mkdirSync(mimeDir, { recursive: true });
+  const mimeXml = path.resolve(import.meta.dirname, "../desktop/pencilpot.xml");
+  fs.copyFileSync(mimeXml, mimeTarget);
+  console.log(`  installed MIME: ${mimeTarget}`);
+  try {
+    execFileSync("update-mime-database", [path.join(HOME, ".local", "share", "mime")], { stdio: "inherit" });
+  } catch (e) {
+    console.warn(`  warning: update-mime-database failed: ${e.message}`);
+  }
+
+  // 3. Desktop entry
+  fs.mkdirSync(appsDir, { recursive: true });
+  const templatePath = path.resolve(import.meta.dirname, "../desktop/pencilpot.desktop");
+  const template = fs.readFileSync(templatePath, "utf8");
+  const rendered = template.replaceAll("__PENCILPOT_BIN__", binLink);
+  fs.writeFileSync(desktopTarget, rendered, { mode: 0o644 });
+  console.log(`  installed .desktop: ${desktopTarget}`);
+  try {
+    execFileSync("update-desktop-database", [appsDir], { stdio: "inherit" });
+  } catch (e) {
+    console.warn(`  warning: update-desktop-database failed: ${e.message}`);
+  }
+  try {
+    execFileSync("xdg-mime", ["default", "pencilpot.desktop", "application/x-pencil"], { stdio: "inherit" });
+  } catch (e) {
+    console.warn(`  warning: xdg-mime default failed: ${e.message}`);
+  }
+
+  console.log("\nDesktop integration installed:");
+  console.log(`  bin       ${binLink}`);
+  console.log(`  MIME      ${mimeTarget}`);
+  console.log(`  .desktop  ${desktopTarget}`);
 }
 
 function cmdUninstallDesktop() {
-  console.log("uninstall-desktop: implemented in Task D3");
+  const HOME = process.env.HOME || os.homedir();
+  const binLink       = path.join(HOME, ".local", "bin", "pencilpot");
+  const mimeTarget    = path.join(HOME, ".local", "share", "mime", "packages", "pencilpot.xml");
+  const appsDir       = path.join(HOME, ".local", "share", "applications");
+  const desktopTarget = path.join(appsDir, "pencilpot.desktop");
+
+  let removed = [];
+
+  // Remove symlink
+  try { fs.unlinkSync(binLink); removed.push(binLink); } catch {}
+
+  // Remove MIME and update
+  try { fs.unlinkSync(mimeTarget); removed.push(mimeTarget); } catch {}
+  try {
+    execFileSync("update-mime-database", [path.join(HOME, ".local", "share", "mime")], { stdio: "inherit" });
+  } catch (e) {
+    console.warn(`  warning: update-mime-database failed: ${e.message}`);
+  }
+
+  // Remove .desktop and update
+  try { fs.unlinkSync(desktopTarget); removed.push(desktopTarget); } catch {}
+  try {
+    execFileSync("update-desktop-database", [appsDir], { stdio: "inherit" });
+  } catch (e) {
+    console.warn(`  warning: update-desktop-database failed: ${e.message}`);
+  }
+
+  if (removed.length === 0) {
+    console.log("Nothing to remove — desktop integration was not installed.");
+  } else {
+    console.log("Removed:");
+    for (const f of removed) console.log(`  ${f}`);
+  }
 }
 
 function printHelp() {
