@@ -6,6 +6,7 @@
 //                  headless-core/test/store.test.mjs
 //                  pencilpot/test/store.test.mjs
 //                  pencilpot/test/project.test.mjs
+//                  pencilpot/test/live.test.mjs
 //   integration  — engine build, no browser/live needed.
 //                  pencilpot/test/rpc.test.mjs
 //                  pencilpot/test/library.test.mjs
@@ -273,6 +274,7 @@ async function main() {
       path.join(HC,   "test/store.test.mjs"),
       path.join(HERE, "test/store.test.mjs"),
       path.join(HERE, "test/project.test.mjs"),
+      path.join(HERE, "test/live.test.mjs"),
     ];
     console.log(col("cyan", col("bold", "\n▶ tier: unit")));
     const stats = runNodeTier(files);

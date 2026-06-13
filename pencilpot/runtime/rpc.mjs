@@ -7,6 +7,7 @@ import { readFonts } from "../store/fonts.mjs";
 import { resolveProjectRoot, resolveProject } from "../store/project.mjs";
 import { readBody } from "./proxy.mjs";
 import { stub, isStub, buildUpdateFileResponse } from "./stubs.mjs";
+import { noteSelfWrite } from "./live.mjs";
 
 /** Extract the RPC command name from a URL like /api/main/methods/get-file?... */
 const cmd = (url) => url.split("?")[0].split("/").filter(Boolean).pop();
@@ -37,11 +38,15 @@ function transitGet(transitStr, keyword) {
 /**
  * Hydrate -> applyFn(session) -> bump revn -> serialize -> write.
  * Returns { revn } so callers can embed it in the response.
+ *
+ * Calls noteSelfWrite() immediately before the disk write so the live-update
+ * watcher suppresses the resulting fs event (no reload loop for SPA edits).
  */
 function persistChanges(dir, applyFn) {
   const s = sessionFor(dir);
   applyFn(s);
   const revn = s.bumpRevn();
+  noteSelfWrite();                             // ← suppress the watcher
   writeDesign(dir, JSON.parse(s.serializeStore()));
   return { revn };
 }

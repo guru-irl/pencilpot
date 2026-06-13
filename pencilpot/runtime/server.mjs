@@ -7,6 +7,7 @@ import { serveStatic } from "./static.mjs";
 import { resolveProject } from "../store/project.mjs";
 import { readFonts } from "../store/fonts.mjs";
 import { handleGfontsCSS, handleGfontsFont } from "./gfonts.mjs";
+import { startLiveWatcher, handleLiveSse } from "./live.mjs";
 
 const PORT = Number(process.env.PENCILPOT_PORT ?? 7777);
 
@@ -49,6 +50,9 @@ export const CONFIG = {
   project: projectRoot ?? process.env.PENCILPOT_PROJECT ?? null,
   design: designDir,
 };
+
+// Start the live-update watcher for the open design directory.
+const liveWatcher = startLiveWatcher(designDir);
 
 // Derive fileId from the design manifest or env override.
 function readFileId(dir) {
@@ -117,6 +121,11 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === "GET" && req.url.startsWith("/internal/gfonts/font/")) {
       return await handleGfontsFont(req, res);
+    }
+
+    // Live-update SSE endpoint — must be before serveStatic.
+    if (req.method === "GET" && req.url === "/pencilpot/live") {
+      return handleLiveSse(req, res, liveWatcher);
     }
 
     if (req.url.startsWith("/api/")) return await handleRpc(req, res, CONFIG);
