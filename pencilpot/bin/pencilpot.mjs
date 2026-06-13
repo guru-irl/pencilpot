@@ -20,13 +20,21 @@ import { createServer } from "node:net";
 // ---------------------------------------------------------------------------
 function parseArgs(argv) {
   const args = argv.slice(2); // drop node + script
-  const cmd = args[0];
+  let cmd = args[0];
   const flags = {};
   const positional = [];
 
+  // Normalise --help / -h as a pseudo-command so the switch below can handle it.
+  if (cmd === "--help" || cmd === "-h") {
+    cmd = "--help";
+    return { cmd, flags, positional };
+  }
+
   for (let i = 1; i < args.length; i++) {
     const a = args[i];
-    if (a.startsWith("--")) {
+    if (a === "--help" || a === "-h") {
+      flags["help"] = true;
+    } else if (a.startsWith("--")) {
       const key = a.slice(2);
       const next = args[i + 1];
       if (next !== undefined && !next.startsWith("--")) {
@@ -86,24 +94,28 @@ async function cmdNew(positional, flags) {
   }
 
   // If arg contains a separator it's a path; else treat as name in cwd.
-  const isPath = arg.includes(path.sep) || arg.startsWith(".");
-  const dir  = isPath ? path.resolve(arg) : path.resolve(arg);
+  const dir  = path.resolve(arg);
   const name = path.basename(dir);
 
   fs.mkdirSync(dir, { recursive: true });
 
   // Import store helpers (dynamic so tests can mock before calling)
   const { initProject, addDesign } = await import("../store/project.mjs");
+  const { writeDesign } = await import("../store/store.mjs");
+  const { createSession } = await import("../../headless-core/target/headless/penpot.js");
 
   initProject(dir, name);
 
   const pencilPath = path.join(dir, `${name}.pencil`);
   console.log(`created ${pencilPath}`);
 
-  if (flags["design"]) {
-    addDesign(dir, flags["design"]);
-    console.log(`added design "${flags["design"]}"`);
-  }
+  // Always scaffold a starter design so the project is immediately openable.
+  const designName = flags["design"] || "main";
+  const designDir = addDesign(dir, designName);
+  // Write a blank starter design using the engine so manifest.edn exists.
+  const s = createSession(JSON.stringify({ empty: true }));
+  writeDesign(designDir, JSON.parse(s.serializeStore()));
+  console.log(`added starter design "${designName}" → ${designDir}`);
 }
 
 async function cmdOpen(positional, flags) {
@@ -300,18 +312,91 @@ function printHelp() {
 pencilpot <command> [args] [--flags]
 
 Commands:
-  new <name|dir> [--design <d>]          Scaffold a new .pencil project
+  new <name|dir> [--design <d>]          Scaffold a new .pencil project (starter design included)
   open <path.pencil|dir> [--no-window]   Start the runtime and open the editor
                           [--port N]
+  import <file.penpot>                   Import a .penpot file as a design in a project
+         [--project <dir>]               Project directory (default: cwd)
+         [--name <design>]               Design name (default: file basename)
+         [--instance <url>]              penpot-hl instance (default: http://localhost:9101)
+         [--token <tok>]                 Auth token (default: from infra/penpot-hl/test-env.json)
   install-desktop                         Install as a desktop app (Task D3)
   uninstall-desktop                       Remove the desktop app entry (Task D3)
-  --help                                  Show this help
+  --help, -h                              Show this help
 
 Examples:
   pencilpot new my-design
   pencilpot open my-design/my-design.pencil
   pencilpot open my-design/ --port 8080 --no-window
+  pencilpot import Wireframes.penpot --project my-design/ --name wireframes
 `.trim());
+}
+
+// ---------------------------------------------------------------------------
+// import command
+// ---------------------------------------------------------------------------
+async function cmdImport(positional, flags) {
+  const filePath = positional[0];
+  if (!filePath) {
+    console.error("Usage: pencilpot import <file.penpot> [--project <dir>] [--name <design>] [--instance <url>] [--token <tok>]");
+    process.exit(1);
+  }
+
+  const absFile = path.resolve(filePath);
+  if (!fs.existsSync(absFile)) {
+    console.error(`File not found: ${absFile}`);
+    process.exit(1);
+  }
+
+  // Resolve project dir
+  const projectArg = flags["project"] ? path.resolve(flags["project"]) : process.cwd();
+  const { resolveProject, addDesign } = await import("../store/project.mjs");
+  const { writeDesign } = await import("../store/store.mjs");
+
+  let proj;
+  try {
+    proj = resolveProject(projectArg);
+  } catch (e) {
+    console.error(`Error resolving project: ${e.message}`);
+    process.exit(1);
+  }
+
+  // Derive design name from flag or filename
+  const baseName = path.basename(absFile, ".penpot");
+  const designName = flags["name"] || baseName.toLowerCase().replace(/[^a-z0-9-_]/g, "-");
+
+  // penpot-hl connection params
+  const ENV_FILE = path.resolve(import.meta.dirname, "../../infra/penpot-hl/test-env.json");
+  let envCfg = {};
+  try { envCfg = JSON.parse(fs.readFileSync(ENV_FILE, "utf8")); } catch {}
+  const instance = flags["instance"] || process.env.PENPOT_HL_BASE || "http://localhost:9101";
+  const token    = flags["token"]    || envCfg.token || "";
+  const projectId = envCfg.projectId || "";
+
+  if (!token)     { console.error("No auth token — pass --token or ensure infra/penpot-hl/test-env.json exists"); process.exit(1); }
+  if (!projectId) { console.error("No projectId — ensure infra/penpot-hl/test-env.json exists"); process.exit(1); }
+
+  console.log(`importing ${absFile} → designs/${designName} (via ${instance})…`);
+
+  // Step 1: POST to import-binfile, get new file-id
+  const { importBinfile } = await import("../runtime/import-binfile.mjs");
+  const newFileId = await importBinfile(absFile, { instance, token, projectId, name: designName });
+  console.log(`  imported → file-id: ${newFileId}`);
+
+  // Step 2: fetch the file from penpot-hl
+  const { getFile } = await import("../../headless-core/sdk/rpc.mjs");
+  const { dataTransit, raw } = await getFile(newFileId, token);
+
+  // Step 3: hydrate + serialize via engine
+  const { createSession } = await import("../../headless-core/target/headless/penpot.js");
+  const s = createSession(JSON.stringify({ fromTransit: dataTransit, meta: raw }));
+  const parts = JSON.parse(s.serializeStore());
+
+  // Step 4: register + write to project
+  const designDir = addDesign(proj.root, designName);
+  writeDesign(designDir, parts);
+
+  console.log(`imported ${path.basename(absFile)} → designs/${designName}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -319,7 +404,7 @@ Examples:
 // ---------------------------------------------------------------------------
 const { cmd, flags, positional } = parseArgs(process.argv);
 
-if (!cmd || flags["help"]) {
+if (!cmd || cmd === "--help" || flags["help"]) {
   printHelp();
   process.exit(0);
 }
@@ -330,6 +415,9 @@ switch (cmd) {
     break;
   case "open":
     await cmdOpen(positional, flags);
+    break;
+  case "import":
+    await cmdImport(positional, flags);
     break;
   case "install-desktop":
     cmdInstallDesktop();
