@@ -2,6 +2,9 @@
   "name": "pencilpot",
   "private": true,
   "type": "module",
+  "bin": {
+    "pencilpot": "bin/pencilpot.mjs"
+  },
   "scripts": {
     "test":      "node run-tests.mjs",
     "test:unit": "node run-tests.mjs --unit",
