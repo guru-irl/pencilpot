@@ -395,8 +395,8 @@
                                   :team-id (dm/str team-id)
                                   :file-id (dm/str file-id))
 
+                       ;; pencilpot: dwn/initialize (collab/notifications ws) removed
                        (rx/of (dpj/initialize-project (:project-id file))
-                              (dwn/initialize team-id file-id)
                               (dwsl/initialize-shape-layout)
                               (fetch-libraries file-id features)
                               (-> (workspace-initialized file-id)
