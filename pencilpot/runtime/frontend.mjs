@@ -29,13 +29,30 @@ function liveUpdateScript() {
 ;(function pencilpotLive() {
   if (window.__pencilpotLiveStarted) return;
   window.__pencilpotLiveStarted = true;
+  // IDLE-GATED reload: never reload while the user is actively interacting.
+  // A reload only happens once the user has been idle for IDLE_MS — so an
+  // external edit (AI/CLI) refreshes the view soon after you pause, but can
+  // NEVER interrupt an in-progress edit (font change, drag, typing, etc.).
+  var IDLE_MS = 2500;
+  var lastActivity = Date.now();
+  var pending = false;
+  ["pointerdown","keydown","input","wheel"].forEach(function(ev){
+    window.addEventListener(ev, function(){ lastActivity = Date.now(); }, true);
+  });
+  function tick() {
+    if (!pending || window.__pencilpotReloading) return;
+    if (Date.now() - lastActivity >= IDLE_MS) {
+      window.__pencilpotReloading = true;
+      console.log("[pencilpot live] external edit — refreshing (idle)");
+      location.reload();
+    } else {
+      setTimeout(tick, 800);   // still interacting — check again shortly
+    }
+  }
   var es = new EventSource("/pencilpot/live");
   es.addEventListener("reload", function(e) {
-    // Guard: ignore stale events that arrive during a reload already in progress.
-    if (window.__pencilpotReloading) return;
-    window.__pencilpotReloading = true;
-    console.log("[pencilpot live] external edit detected (rev=" + e.data + ") — reloading");
-    location.reload();
+    console.log("[pencilpot live] external edit detected (rev=" + e.data + ") — will refresh when idle");
+    if (!pending) { pending = true; tick(); }
   });
   es.onerror = function() {
     // Reconnection is automatic via the browser's EventSource retry logic.
