@@ -357,39 +357,50 @@ async function cmdImport(positional, flags) {
   const { createSession } = await import("../../headless-core/target/headless/penpot.js");
 
   // Resolve project dir:
-  //   --project <dir>   explicit override
-  //   positional[1]     positional target dir (may not exist yet → bootstrap)
-  //   default           cwd
+  //   --project <dir>   explicit: add to an existing project at <dir>
+  //   positional[1]     explicit: use/create that dir as the project root
+  //   default (none)    create a NEW project in a subdir named after the file slug
+  //                     under cwd — do NOT walk up to reuse any ancestor project.
+
+  // Derive slug for new-project naming (same logic used for designName)
+  const baseName = path.basename(absFile, ".penpot");
+  const fileSlug = baseName.toLowerCase().replace(/[^a-z0-9-_]/g, "-");
+
   let projectArg;
+  /** Whether to resolve an existing project (walk-up allowed) vs always bootstrap fresh. */
+  let allowAncestorReuse = false;
+
   if (flags["project"]) {
     projectArg = path.resolve(flags["project"]);
+    allowAncestorReuse = true; // --project explicitly targets an existing project dir
   } else if (positional[1]) {
     projectArg = path.resolve(positional[1]);
+    allowAncestorReuse = false; // positional dir: always bootstrap at that exact location
   } else {
-    projectArg = process.cwd();
+    // Default: create a clearly-named new subdir under cwd — never reuse an ancestor.
+    projectArg = path.resolve(process.cwd(), fileSlug);
+    allowAncestorReuse = false;
   }
 
-  // Try to resolve an existing project; if none exists, bootstrap one.
+  // Try to resolve an existing project; if none exists (or we must not reuse one), bootstrap.
   let proj;
   let bootstrapped = false;
   try {
+    if (!allowAncestorReuse) throw new Error("skip walk-up");
     proj = resolveProject(projectArg);
   } catch {
-    // No project found — bootstrap one at projectArg.
+    // No project found (or walk-up disabled) — bootstrap one at projectArg.
     const projDir = projectArg;
     fs.mkdirSync(projDir, { recursive: true });
     const projName = path.basename(projDir);
     initProject(projDir, projName);
-    // Write a blank starter so the project has at least one design (not set as default yet).
-    // Actually we skip creating a stub "main" — the imported design will be the first and default.
     proj = resolveProject(projDir);
     bootstrapped = true;
     console.log(`bootstrapped project "${projName}" at ${projDir}`);
   }
 
-  // Derive design name from flag or filename
-  const baseName = path.basename(absFile, ".penpot");
-  const designName = flags["name"] || baseName.toLowerCase().replace(/[^a-z0-9-_]/g, "-");
+  // Derive design name from flag or filename (fileSlug already computed above)
+  const designName = flags["name"] || fileSlug;
 
   console.log(`importing ${absFile} → designs/${designName} (native, no backend)…`);
 
@@ -427,9 +438,12 @@ async function cmdImport(positional, flags) {
   // Summary
   const pageCount = Object.keys(parts.pages || {}).length;
   const compCount = Object.keys(parts.components || {}).length;
-  console.log(`imported ${path.basename(absFile)} → designs/${designName} (native, no backend)`);
+  const pencilPath = path.join(proj.root, `${proj.name}.pencil`);
+  console.log(`imported ${path.basename(absFile)} → designs/${designName}`);
   console.log(`  pages: ${pageCount}  components: ${compCount}  media: ${mediaFiles.length}`);
   console.log(`  default design → ${designName}`);
+  console.log(`  project: ${pencilPath}`);
+  console.log(`  run: pencilpot open ${pencilPath}`);
 }
 
 // ---------------------------------------------------------------------------

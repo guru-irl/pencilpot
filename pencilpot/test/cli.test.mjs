@@ -219,6 +219,55 @@ test("pencilpot set-default changes the default design in the manifest", async (
   assert.equal(manifest.default, "main", "set-default changed default to main");
 });
 
+// ---------------------------------------------------------------------------
+// Part A: import with no positional dir / no --project creates a NEW named project
+// under cwd (does NOT reuse ancestor projects)
+// ---------------------------------------------------------------------------
+
+test("pencilpot import with no target dir creates <slug>/<slug>.pencil under cwd (not ancestor reuse)", async (t) => {
+  const sample = [
+    "/home/guru/Downloads/Default Design System.penpot",
+    "/home/guru/Downloads/Default Launcher.penpot",
+    "/tmp/pencilpot-test-sample.penpot",
+  ].find((f) => fs.existsSync(f));
+  if (!sample) return t.skip("no sample .penpot file found");
+
+  // cwd = a brand-new empty tempdir (no .pencil ancestor)
+  const cwd = tmp();
+
+  // Run: pencilpot import <sample>  — no positional dir, no --project
+  const baseName = path.basename(sample, ".penpot");
+  const slug = baseName.toLowerCase().replace(/[^a-z0-9-_]/g, "-");
+
+  let stdout = "";
+  try {
+    stdout = execFileSync("node", [BIN, "import", sample], {
+      encoding: "utf8",
+      cwd,
+      timeout: 120_000,
+    });
+  } catch (e) {
+    t.diagnostic(`import failed: ${e.stderr || e.message}`);
+    throw e;
+  }
+
+  // 1. A subdir named after the file slug must be created
+  const projectDir = path.join(cwd, slug);
+  assert.ok(fs.existsSync(projectDir), `project dir ${projectDir} created`);
+
+  // 2. A <slug>.pencil file must exist inside it (NOT in cwd itself)
+  const pencilFile = path.join(projectDir, `${slug}.pencil`);
+  assert.ok(fs.existsSync(pencilFile), `${slug}.pencil created inside project dir`);
+
+  // 3. No .pencil file in cwd itself (would mean ancestor reuse / wrong location)
+  const cwdPencils = fs.readdirSync(cwd).filter((f) => f.endsWith(".pencil"));
+  assert.equal(cwdPencils.length, 0, "no .pencil dumped in cwd — created in subdir only");
+
+  // 4. stdout must print both the project path AND the open command
+  assert.match(stdout, new RegExp(slug), "stdout mentions the slug/path");
+  assert.match(stdout, /pencilpot open/, "stdout prints the open command");
+});
+
 test("pencilpot open --design <name> --no-window serves that specific design", async (t) => {
   const sample = [
     "/home/guru/Downloads/Default Design System.penpot",
