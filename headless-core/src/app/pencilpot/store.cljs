@@ -7,7 +7,7 @@
   output when data is unchanged, keeping git diffs minimal."
   (:require
    [cljs.reader :as reader]
-   [clojure.pprint :as pp]
+   [goog.string :as gstr]
    [app.common.uuid :as uuid]
    [app.common.types.path :as path]
    [app.common.types.tokens-lib :as ctob]
@@ -69,9 +69,32 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- kcmp
-  "Total comparator over any two values by their printed representation."
+  "Total comparator over any two values, ordering by printed representation.
+
+  Fast-paths the homogeneous common cases (keyword/keyword, string/string,
+  number/number) with native `compare`, which is byte-for-byte equivalent to
+  comparing their pr-str forms for those types — with ONE exception: mixing a
+  qualified keyword (`:a/x`) with an unqualified keyword (`:b`) orders
+  differently under native compare (namespace-first) than under pr-str. To keep
+  ordering identical to the historical pr-str comparator we only fast-path
+  keywords when BOTH have the same namespace (both nil ⇒ both unqualified, the
+  overwhelmingly common case); otherwise we fall back to pr-str. Numbers compare
+  identically as long as both are the same kind, which they are here (all EDN
+  numeric leaves). Anything mixed/other falls back to the pr-str comparator."
   [a b]
-  (compare (pr-str a) (pr-str b)))
+  (cond
+    (and (keyword? a) (keyword? b)
+         (= (namespace a) (namespace b)))
+    (compare a b)
+
+    (and (string? a) (string? b))
+    (compare a b)
+
+    (and (number? a) (number? b))
+    (compare a b)
+
+    :else
+    (compare (pr-str a) (pr-str b))))
 
 (defn- canon
   "Recursively turn every map into a sorted-map (keys ordered by pr-str) and
@@ -99,12 +122,102 @@
     (seq? x)        (mapv canon x)
     :else           x))
 
+;; ---------------------------------------------------------------------------
+;; Fast deterministic EDN pretty-printer
+;;
+;; cljs.pprint/pprint is pathologically slow (~3s for a 1.4MB design), and the
+;; whole design is re-serialised on every edit.  This hand-rolled emitter walks
+;; the already-canonicalised structure (maps are sorted-map-by kcmp, sets are
+;; sorted-set-by kcmp, geometry is wrapped in GeomTaggedLiteral) and appends to
+;; a goog.string.StringBuffer.  Leaves/tagged-literals are emitted via pr-str so
+;; #uuid / #penpot/* / GeomTaggedLiteral all print correctly; only collections
+;; are hand-formatted.
+;;
+;; Layout (diff-friendly, stable):
+;;   - maps:    one `:key value` entry per line, no trailing commas
+;;   - vectors/sets containing any collection: one element per line
+;;   - vectors/sets of scalars only: inline `[a b c]`
+;;   - empty collections: `{}` `[]` `#{}`
+;; This layout differs from the old pprint output — existing on-disk designs are
+;; reformatted once on next write; the parsed data is identical.
+;; ---------------------------------------------------------------------------
+
+(def ^:private indent-unit "  ")
+
+(defn- emit-indent! [^js sb depth]
+  (dotimes [_ depth] (.append sb indent-unit)))
+
+(defn- coll-val?
+  "True when `x` is a collection we hand-format multi-line (map/vector/set/seq).
+  GeomTaggedLiteral is NOT a collection — it prints as a scalar via pr-str."
+  [x]
+  (or (map? x) (vector? x) (set? x) (seq? x)))
+
+(defn- any-coll? [coll]
+  (reduce (fn [_ x] (if (coll-val? x) (reduced true) false)) false coll))
+
+(declare emit!)
+
+(defn- emit-map! [^js sb m depth]
+  (if (zero? (count m))
+    (.append sb "{}")
+    (let [child (inc depth)]
+      (.append sb "{")
+      (doseq [[k v] m]
+        (.append sb "\n")
+        (emit-indent! sb child)
+        (.append sb (pr-str k))
+        (.append sb " ")
+        (emit! sb v child))
+      (.append sb "}"))))
+
+(defn- emit-seq-multiline! [^js sb coll open close depth]
+  (let [child (inc depth)]
+    (.append sb open)
+    (doseq [x coll]
+      (.append sb "\n")
+      (emit-indent! sb child)
+      (emit! sb x child))
+    (.append sb close)))
+
+(defn- emit-seq-inline! [^js sb coll open close]
+  (.append sb open)
+  (loop [xs (seq coll)
+         first? true]
+    (when xs
+      (when-not first? (.append sb " "))
+      ;; scalars/tagged-literals only on this path → pr-str is correct & fast
+      (.append sb (pr-str (first xs)))
+      (recur (next xs) false)))
+  (.append sb close))
+
+(defn- emit-coll! [^js sb coll open close depth]
+  (cond
+    (zero? (count coll)) (do (.append sb open) (.append sb close))
+    (any-coll? coll)     (emit-seq-multiline! sb coll open close depth)
+    :else                (emit-seq-inline! sb coll open close)))
+
+(defn- emit! [^js sb x depth]
+  (cond
+    (map? x)    (emit-map! sb x depth)
+    (vector? x) (emit-coll! sb x "[" "]" depth)
+    (set? x)    (emit-coll! sb x "#{" "}" depth)
+    (seq? x)    (emit-coll! sb x "(" ")" depth)
+    :else       (.append sb (pr-str x))))
+
 (defn canonical-edn
-  "Return a deterministic, pretty-printed EDN string for `data`."
+  "Return a deterministic, pretty-printed EDN string for `data`.
+
+  `canon` first normalises maps/sets into kcmp-sorted collections and wraps
+  geometry records as tagged literals; `emit!` then renders that structure with
+  a fast string builder.  Output is deterministic (git-stable) and losslessly
+  parsed back by `read-edn`."
   [data]
-  (binding [cljs.pprint/*print-right-margin*  80
-            cljs.core/*print-namespace-maps*  false]
-    (with-out-str (pp/pprint (canon data)))))
+  (binding [cljs.core/*print-namespace-maps* false]
+    (let [sb (gstr/StringBuffer.)]
+      (emit! sb (canon data) 0)
+      (.append sb "\n")
+      (.toString sb))))
 
 ;; ---------------------------------------------------------------------------
 ;; EDN tag readers
