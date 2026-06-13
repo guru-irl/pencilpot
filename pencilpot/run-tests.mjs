@@ -1,11 +1,19 @@
 #!/usr/bin/env node
-// One-command tiered test runner for Pencilpot Phase 1.
+// One-command tiered test runner for Pencilpot (Phases 1–3).
 //
 // Tiers:
 //   unit         — no network/browser. engine build required.
-//                  headless-core/test/store.test.mjs + pencilpot/test/store.test.mjs
+//                  headless-core/test/store.test.mjs
+//                  pencilpot/test/store.test.mjs
+//                  pencilpot/test/project.test.mjs
 //   integration  — engine build, no browser/live needed.
-//                  pencilpot/test/rpc.test.mjs + pencilpot/test/library.test.mjs
+//                  pencilpot/test/rpc.test.mjs
+//                  pencilpot/test/library.test.mjs
+//                  pencilpot/test/cli.test.mjs
+//   desktop      — smoke: bash pencilpot/scripts/verify-desktop.sh
+//                  Runs only when `pencilpot` is on PATH AND
+//                  ~/.local/share/applications/pencilpot.desktop exists.
+//                  LOUDLY skipped (not failed) when not installed.
 //   e2e          — Playwright + penpot-hl :9101. Seeds a project, starts the runtime.
 //                  pencilpot/e2e/boot.spec.mjs + edit.spec.mjs + library.spec.mjs
 //
@@ -15,14 +23,15 @@
 //      e2e runs only when LIVE. If not LIVE, e2e is LOUDLY skipped (not failed).
 //
 // Flags:
-//   --unit   run unit + integration only (never e2e)
+//   --unit   run unit + integration only (never desktop smoke or e2e)
 //   --live   require penpot-hl :9101; FAIL preflight if down
-//   (none)   auto: unit+integration always; e2e if live, else skip+warn
+//   (none)   auto: unit+integration+desktop always; e2e if live, else skip+warn
 
 import { spawnSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import os from "node:os";
 
 // Resolve all paths from this script's location so it works from any cwd.
 const HERE = path.dirname(fileURLToPath(import.meta.url));       // pencilpot/
@@ -204,6 +213,29 @@ function loudSkipE2e(reason) {
   console.log(col("yellow", `${line}\n`));
 }
 
+// ── desktop: detect installation + run smoke ─────────────────────────────────
+function desktopInstalled() {
+  const onPath = spawnSync("command", ["-v", "pencilpot"], { shell: true });
+  const hasDesktop = existsSync(path.join(os.homedir(), ".local", "share", "applications", "pencilpot.desktop"));
+  return onPath.status === 0 && hasDesktop;
+}
+
+function runDesktopSmoke() {
+  const t0 = Date.now();
+  const script = path.join(HERE, "scripts", "verify-desktop.sh");
+  const r = spawnSync("bash", [script], { stdio: "inherit" });
+  return { exit: r.status ?? 1, ms: Date.now() - t0 };
+}
+
+function loudSkipDesktop() {
+  const line = "═".repeat(72);
+  console.log(col("yellow", `\n${line}`));
+  console.log(col("yellow", col("bold", "  ⚠  SKIPPED desktop smoke")));
+  console.log(col("yellow", "     Desktop integration not installed — run `pencilpot install-desktop`"));
+  console.log(col("yellow", "     (or ensure ~/.local/share/applications/pencilpot.desktop exists)"));
+  console.log(col("yellow", `${line}\n`));
+}
+
 // ── LOUD skip block (frontend bundle not built) ───────────────────────────────
 function loudSkipE2eBundle() {
   const line = "═".repeat(72);
@@ -251,10 +283,25 @@ async function main() {
     const files = [
       path.join(HERE, "test/rpc.test.mjs"),
       path.join(HERE, "test/library.test.mjs"),
+      path.join(HERE, "test/cli.test.mjs"),
     ];
     console.log(col("cyan", col("bold", "\n▶ tier: integration")));
     const stats = runNodeTier(files);
     results.push({ name: "integration", status: "ran", stats });
+  }
+
+  // ── desktop smoke tier ───────────────────────────────────────────────────────
+  if (!UNIT_ONLY) {
+    if (desktopInstalled()) {
+      console.log(col("cyan", col("bold", "\n▶ tier: desktop smoke")));
+      const { exit, ms } = runDesktopSmoke();
+      // Report as pass/fail row (no node test counts — it's a script)
+      const stats = { tests: 1, pass: exit === 0 ? 1 : 0, fail: exit === 0 ? 0 : 1, skip: 0, exit, ms };
+      results.push({ name: "desktop", status: "ran", stats });
+    } else {
+      loudSkipDesktop();
+      results.push({ name: "desktop", status: "skipped" });
+    }
   }
 
   // ── e2e tier ─────────────────────────────────────────────────────────────────
@@ -299,11 +346,18 @@ async function main() {
   console.log(line);
   console.log(`  wall-time: ${(wallMs / 1000).toFixed(2)}s`);
   if (anySkipped) {
+    const e2eSkipped  = results.some((r) => r.name === "e2e"     && r.status === "skipped");
+    const deskSkipped = results.some((r) => r.name === "desktop" && r.status === "skipped");
     const bundleExists = existsSync(BUNDLE);
-    if (!bundleExists) {
-      console.log(col("yellow", col("bold", "  ⚠  e2e SKIPPED — build the frontend bundle (see docs/pencilpot/architecture/02-frontend-build.md).")));
-    } else {
-      console.log(col("yellow", col("bold", "  ⚠  e2e SKIPPED — not a full green. Bring up penpot-hl :9101.")));
+    if (deskSkipped) {
+      console.log(col("yellow", col("bold", "  ⚠  desktop SKIPPED — run `pencilpot install-desktop` then re-run.")));
+    }
+    if (e2eSkipped) {
+      if (!bundleExists) {
+        console.log(col("yellow", col("bold", "  ⚠  e2e SKIPPED — build the frontend bundle (see docs/pencilpot/architecture/02-frontend-build.md).")));
+      } else {
+        console.log(col("yellow", col("bold", "  ⚠  e2e SKIPPED — not a full green. Bring up penpot-hl :9101.")));
+      }
     }
   }
   console.log(col("bold", line));
@@ -312,9 +366,9 @@ async function main() {
     console.log(col("red", col("bold", "\n✖ FAIL — one or more tests failed.\n")));
     process.exit(1);
   }
-  console.log(col("green", col("bold",
-    `\n✔ ${anySkipped ? "unit+integration passed (e2e skipped)" : "all tiers passed"}\n`
-  )));
+  const skippedNames = results.filter((r) => r.status === "skipped").map((r) => r.name);
+  const suffix = skippedNames.length ? ` (${skippedNames.join(", ")} skipped)` : "";
+  console.log(col("green", col("bold", `\n✔ passed${suffix}\n`)));
   process.exit(0);
 }
 
