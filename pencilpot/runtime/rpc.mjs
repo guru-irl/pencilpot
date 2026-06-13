@@ -220,6 +220,18 @@ export async function handleRpc(req, res, cfg) {
     return;
   }
 
-  res.writeHead(404);
-  res.end(`no stub: ${command}`);
+  // Pencilpot is a backendless IDE — unknown SaaS RPCs (update-profile-props,
+  // audit, prefs, set-workspace-visited, etc.) must NEVER return 4xx.
+  // A 404 causes Penpot's repo layer to raise :unable-to-process-repository-response
+  // and crash the whole workspace with an internal-error screen.
+  // Return a benign 200 with an empty transit map so fire-and-forget writes no-op.
+  console.warn(`[pencilpot] unhandled RPC ${command} -> 200 {}`);
+  const wantTransitFallback = (req.headers["accept"] || "").includes("transit");
+  if (wantTransitFallback) {
+    res.writeHead(200, { "content-type": "application/transit+json" });
+    res.end('["^ "]');
+  } else {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end("{}");
+  }
 }
