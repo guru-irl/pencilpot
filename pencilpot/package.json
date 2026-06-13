@@ -1,1 +1,13 @@
-{ "name": "pencilpot", "private": true, "type": "module", "devDependencies": { "@playwright/test": "^1.48.0" } }
+{
+  "name": "pencilpot",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test":      "node run-tests.mjs",
+    "test:unit": "node run-tests.mjs --unit",
+    "test:e2e":  "node run-tests.mjs --live"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.48.0"
+  }
+}
