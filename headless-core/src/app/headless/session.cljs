@@ -411,24 +411,24 @@
                                        "design-tokens/v1" "tokens/numeric-input" "variants/v1"
                                        "render-wasm/v1" "text-editor/v2" "text-editor-wasm/v1"}
                                      (map str (or features [])))
-               ;; NOTE: :id must be a proper UUID (not a string) so that transit encodes it
-               ;; as ~u<uuid-str> — the SPA stores the file in state keyed by UUID, and
-               ;; workspace-content* reads (:id file) to derive file-id for child components.
-               ;; A String :id causes map-key mismatch → objects lookup returns nil → design
-               ;; panel shows no shape properties.
-               meta-m   {:id       file-id
+               ;; meta-m is the JSON `meta` (and the source the test re-hydrates from) — :id MUST be
+               ;; a STRING there (clj->js of a UUID serializes to a mangled object → (uuid/uuid obj)
+               ;; → toLowerCase crash on re-hydrate).  The TRANSIT body (`resp`), however, needs :id
+               ;; as a proper UUID so the SPA keys the file by UUID (string id → objects lookup nil →
+               ;; empty design panel).  So: string in meta, UUID in resp.
+               meta-m   {:id       (str file-id)
                          :name     nm
                          :revn     revn
                          :vern     vern
                          :features served-features}
                resp     (if envelope
-                          ;; Full round-trip: restore the original envelope + live :data
+                          ;; Full round-trip: restore the original envelope (its :id is already a UUID) + live :data
                           (-> envelope
                               (assoc :data data)
                               (assoc :revn revn)
                               (assoc :vern vern)
                               (assoc :features served-features))
-                          (assoc meta-m :data data))
+                          (assoc meta-m :data data :id file-id))
                body     (t/encode-str resp)]
            (js/JSON.stringify (clj->js {:meta meta-m :transit body}))))
        :retargetFonts
