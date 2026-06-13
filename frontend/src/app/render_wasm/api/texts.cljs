@@ -18,6 +18,52 @@
 (def ^:const PARAGRAPH-ATTR-U8-SIZE 12)
 (def ^:const SPAN-ATTR-U8-SIZE 64)
 (def ^:const MAX-TEXT-FILLS types.fills.impl/MAX-FILLS)
+(def ^:const MAX-TEXT-VARIATIONS 8)
+
+;; Variable-font axis overrides (font-variation-settings) appended at the END
+;; of each span, AFTER the fills. Matches Rust's RawTextSpan tail:
+;;   variation_count : u32                          -> 4 bytes
+;;   variations      : [RawVariation; 8]            -> 8 * (u32 tag + f32 value)
+;;                                                  -> 8 * 8 = 64 bytes
+;; Total: 4 + 64 = 68 bytes.
+(def ^:const VARIATION-U8-SIZE 8)
+(def ^:const SPAN-VARIATIONS-U8-SIZE (+ 4 (* MAX-TEXT-VARIATIONS VARIATION-U8-SIZE)))
+
+(defn- encode-variation-tag
+  "Encodes a (max 4-char) axis tag string into a big-endian u32:
+  (c0<<24)|(c1<<16)|(c2<<8)|c3, padding short tags with 0x00 and
+  truncating to 4 bytes."
+  [tag]
+  (let [tag (str tag)
+        cp  (fn [i] (if (< i (count tag))
+                      (bit-and (.charCodeAt tag i) 0xFF)
+                      0))]
+    ;; Use unsigned arithmetic to avoid sign issues on the high byte.
+    (+ (* (cp 0) 0x1000000)
+       (* (cp 1) 0x10000)
+       (* (cp 2) 0x100)
+       (cp 3))))
+
+(defn- write-span-variations
+  "Writes variation_count (u32) followed by MAX-TEXT-VARIATIONS (tag u32, value f32)
+  entries, zero-filling unused slots. `variations` is a map of tag-string->number."
+  [offset dview variations]
+  (let [entries (take MAX-TEXT-VARIATIONS (seq variations))
+        n       (count entries)
+        offset  (mem/write-u32 offset dview n)
+        offset  (reduce (fn [offset [tag value]]
+                          (-> offset
+                              (mem/write-u32 dview (encode-variation-tag tag))
+                              (mem/write-f32 dview value)))
+                        offset
+                        entries)
+        padding (max 0 (- MAX-TEXT-VARIATIONS n))]
+    (reduce (fn [offset _]
+              (-> offset
+                  (mem/write-u32 dview 0)
+                  (mem/write-f32 dview 0.0)))
+            offset
+            (range padding))))
 
 (defn- encode-text
   "Into an UTF8 buffer. Returns an ArrayBuffer instance"
@@ -91,6 +137,7 @@
                     text-buffer (encode-text (get span :text ""))
                     text-length (mem/size text-buffer)
                     fills       (take MAX-TEXT-FILLS (get span :fills []))
+                    variations  (get span :font-variation-settings)
 
                     font-variant-id
                     (get span :font-variant-id)
@@ -134,20 +181,28 @@
                     (mem/write-i32 dview (count fills))
                     (mem/assert-written offset SPAN-ATTR-U8-SIZE)
 
-                    (write-span-fills dview fills))))
+                    (write-span-fills dview fills)
+                    (write-span-variations dview variations))))
             offset
             spans)))
 
 (defn write-shape-text
   ;; buffer has the following format:
   ;; [<num-spans> <paragraph_attributes> <spans_attributes> <text>]
+  ;;
+  ;; Per-span byte layout (must match Rust's RawTextSpan exactly):
+  ;;   [0   .. 64)    SPAN-ATTR-U8-SIZE        (header: style/size/font/etc.)
+  ;;   [64  .. 64+1280)  fills: 8 * FILL-U8-SIZE (8 * 160 = 1280)
+  ;;   [1344.. 1412)  variations: variation_count u32 + 8 * (tag u32, value f32)
+  ;;                                            (4 + 64 = 68)
+  ;;   total span size = 64 + 1280 + 68 = 1412 bytes
   [spans paragraph text]
   (let [normalized-paragraph (f/normalize-paragraph-font paragraph)
         normalized-spans (map #(f/normalize-span-font % normalized-paragraph) spans)
         num-spans    (count normalized-spans)
         fills-size    (* types.fills.impl/FILL-U8-SIZE MAX-TEXT-FILLS)
         metadata-size (+ PARAGRAPH-ATTR-U8-SIZE
-                         (* num-spans (+ SPAN-ATTR-U8-SIZE fills-size)))
+                         (* num-spans (+ SPAN-ATTR-U8-SIZE fills-size SPAN-VARIATIONS-U8-SIZE)))
 
         text-buffer   (encode-text text)
         text-size     (mem/size text-buffer)

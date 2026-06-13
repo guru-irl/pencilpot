@@ -17,6 +17,14 @@ const RAW_SPAN_DATA_SIZE: usize = std::mem::size_of::<RawTextSpan>();
 const RAW_PARAGRAPH_DATA_SIZE: usize = std::mem::size_of::<RawParagraphData>();
 
 const MAX_TEXT_FILLS: usize = 8;
+const MAX_TEXT_VARIATIONS: usize = 8;
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RawVariation {
+    tag: u32,
+    value: f32,
+}
 
 #[derive(Debug, PartialEq, Clone, Copy, ToJs)]
 #[repr(u8)]
@@ -141,6 +149,8 @@ pub struct RawTextSpan {
     text_length: u32,
     fill_count: u32,
     fills: [RawFillData; MAX_TEXT_FILLS],
+    variation_count: u32,
+    variations: [RawVariation; MAX_TEXT_VARIATIONS],
 }
 
 impl From<[u8; RAW_SPAN_DATA_SIZE]> for RawTextSpan {
@@ -177,6 +187,13 @@ impl From<RawTextSpan> for shapes::TextSpan {
             .map(|fill| fill.into())
             .collect();
 
+        let variations = value
+            .variations
+            .into_iter()
+            .take(value.variation_count as usize)
+            .map(|variation| (variation.tag, variation.value))
+            .collect();
+
         Self::new(
             text,
             font_family,
@@ -189,6 +206,7 @@ impl From<RawTextSpan> for shapes::TextSpan {
             value.font_weight,
             uuid_from_u32(value.font_variant_id),
             fills,
+            variations,
         )
     }
 }

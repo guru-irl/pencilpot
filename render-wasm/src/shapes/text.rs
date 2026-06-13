@@ -1234,6 +1234,9 @@ pub struct TextSpan {
     pub text_transform: Option<TextTransform>,
     pub text_direction: TextDirection,
     pub fills: Vec<shapes::Fill>,
+    /// Variable-font axis overrides as (4-byte tag, value) pairs.
+    /// Empty when the span has no `font-variation-settings`.
+    pub variations: Vec<(u32, f32)>,
 }
 
 impl TextSpan {
@@ -1250,6 +1253,7 @@ impl TextSpan {
         font_weight: i32,
         font_variant_id: Uuid,
         fills: Vec<shapes::Fill>,
+        variations: Vec<(u32, f32)>,
     ) -> Self {
         Self {
             text,
@@ -1263,6 +1267,7 @@ impl TextSpan {
             font_weight,
             font_variant_id,
             fills,
+            variations,
         }
     }
 
@@ -1310,6 +1315,27 @@ impl TextSpan {
         style.set_font_size(self.font_size);
         style.set_letter_spacing(self.letter_spacing);
         style.set_half_leading(true);
+
+        // Variable-font axis overrides (font-variation-settings). Skia's
+        // paragraph layout applies these axis coordinates against the
+        // registered typeface; no typeface re-registration is needed.
+        if !self.variations.is_empty() {
+            let coordinates: Vec<skia::font_arguments::variation_position::Coordinate> = self
+                .variations
+                .iter()
+                .map(
+                    |&(tag, value)| skia::font_arguments::variation_position::Coordinate {
+                        axis: skia::FourByteTag::from(tag),
+                        value,
+                    },
+                )
+                .collect();
+            let position = skia::font_arguments::VariationPosition {
+                coordinates: &coordinates,
+            };
+            let args = skia::FontArguments::new().set_variation_design_position(position);
+            style.set_font_arguments(Some(&args));
+        }
 
         style
     }
@@ -1705,5 +1731,39 @@ mod tests {
             process_ignored_chars("a\x01b", Browser::Firefox as u8),
             "ab"
         );
+    }
+
+    fn make_span(variations: Vec<(u32, f32)>) -> TextSpan {
+        use crate::shapes::fonts::FontStyle;
+        TextSpan::new(
+            String::from("hello"),
+            FontFamily::new(Uuid::nil(), 400, FontStyle::Normal),
+            16.0,
+            1.0,
+            0.0,
+            None,
+            None,
+            TextDirection::LTR,
+            400,
+            Uuid::nil(),
+            vec![],
+            variations,
+        )
+    }
+
+    #[test]
+    fn text_span_carries_variations() {
+        // "wght" big-endian == 0x77676874
+        let span = make_span(vec![(0x77676874, 650.0), (0x77647468, 100.0)]);
+        assert_eq!(
+            span.variations,
+            vec![(0x77676874, 650.0), (0x77647468, 100.0)]
+        );
+    }
+
+    #[test]
+    fn text_span_without_variations_is_empty() {
+        let span = make_span(vec![]);
+        assert!(span.variations.is_empty());
     }
 }
