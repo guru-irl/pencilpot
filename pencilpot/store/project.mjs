@@ -111,6 +111,21 @@ export function resolveProject(anyPath) {
 }
 
 /**
+ * Set the default design in a project.
+ * Validates that the named design exists, then updates manifest.default.
+ * Throws a clear error if the design is not found.
+ */
+export function setDefault(root, name) {
+  const pencilPath = findPencilFile(root);
+  if (!pencilPath) throw new Error(`No .pencil manifest found in ${root}`);
+  const manifest = JSON.parse(fs.readFileSync(pencilPath, "utf8"));
+  const found = manifest.designs.find((d) => d.name === name);
+  if (!found) throw new Error(`Design "${name}" not found in project ${root}`);
+  manifest.default = name;
+  fs.writeFileSync(pencilPath, JSON.stringify(manifest, null, 2));
+}
+
+/**
  * List designs in a project root dir.
  * Reads the .pencil manifest and returns [{name, dir}].
  */

@@ -102,6 +102,8 @@ function groupEntries(jsonEntries, binaryEntries) {
         components: {},
         tokensLib: null,
         mediaIds: [],
+        _primaryIds: [],   // storage-object ids that are primary media (must exist)
+        _thumbnailIds: [], // storage-object ids that are thumbnails (may be absent)
       };
     }
     return result.files[fileId];
@@ -195,19 +197,14 @@ function groupEntries(jsonEntries, binaryEntries) {
       if (!fileSlot.mediaIds.includes(mid)) {
         fileSlot.mediaIds.push(mid);
       }
-      // Track the storage-object id (mediaId inside the descriptor)
-      // so Node can resolve the binary in objects/
+      // Track the storage-object ids (mediaId = primary, thumbnailId = optional)
       try {
         const desc = JSON.parse(readText(absPath));
-        if (desc.mediaId && !fileSlot._storageIds) {
-          fileSlot._storageIds = [];
-        }
         if (desc.mediaId) {
-          fileSlot._storageIds.push(desc.mediaId);
+          fileSlot._primaryIds.push(desc.mediaId);
         }
         if (desc.thumbnailId) {
-          if (!fileSlot._storageIds) fileSlot._storageIds = [];
-          fileSlot._storageIds.push(desc.thumbnailId);
+          fileSlot._thumbnailIds.push(desc.thumbnailId);
         }
       } catch {}
       continue;
@@ -295,20 +292,66 @@ export async function importPenpot(filePath) {
 
     // Build the set of storage-object IDs referenced by media descriptors
     // (media descriptors link file-media-object-id → storage-object mediaId/thumbnailId)
-    const referencedStorageIds = new Set(
-      Object.values(grouped.files).flatMap((f) => f._storageIds || [])
+    // Separate primary mediaIds from thumbnailIds so we can warn only on missing primaries.
+    const primaryMediaIds = new Set(
+      Object.values(grouped.files).flatMap((f) => f._primaryIds || [])
     );
+    const thumbnailIds = new Set(
+      Object.values(grouped.files).flatMap((f) => f._thumbnailIds || [])
+    );
+    const allReferencedIds = new Set([...primaryMediaIds, ...thumbnailIds]);
+
+    // For each referenced id, GLOB objects/<id>.* in the temp dir to find the
+    // actual file (which may be .png, .jpg, or any extension).  Skip thumbnail
+    // ids that weren't exported (silently); warn only for missing primary mediaIds.
+    const resolvedMedia = [];
+    const objectsDir = path.join(tmpDir, "objects");
+    const hasObjectsDir = fs.existsSync(objectsDir);
+
+    for (const id of allReferencedIds) {
+      let found = false;
+      if (hasObjectsDir) {
+        for (const entry of fs.readdirSync(objectsDir)) {
+          // entry format: <id>.<ext>  (no dots in the id part)
+          const dotIdx = entry.lastIndexOf(".");
+          if (dotIdx === -1) continue;
+          const entryId = entry.slice(0, dotIdx);
+          const entryExt = entry.slice(dotIdx + 1);
+          if (entryId === id) {
+            resolvedMedia.push({ id, srcPath: path.join(objectsDir, entry), ext: entryExt });
+            found = true;
+            break;
+          }
+        }
+      }
+      if (!found && primaryMediaIds.has(id)) {
+        // Only warn for primary media that genuinely has no binary in the zip.
+        console.warn(`  warning: primary media object ${id} not found in zip (skipping)`);
+      }
+      // Missing thumbnails → silent skip (do nothing).
+    }
+
+    // If no media descriptors at all, fall back to all binaries found.
+    const effectiveMedia = allReferencedIds.size > 0 ? resolvedMedia : mediaFiles;
+
+    // Copy resolved media to a stable temp location BEFORE cleaning up tmpDir,
+    // so that the caller can still copy from srcPath after this function returns.
+    const stableDir = fs.mkdtempSync(path.join(os.tmpdir(), "pencilpot-media-"));
+    const stableMedia = [];
+    for (const mf of effectiveMedia) {
+      const dest = path.join(stableDir, `${mf.id}.${mf.ext}`);
+      fs.copyFileSync(mf.srcPath, dest);
+      stableMedia.push({ id: mf.id, srcPath: dest, ext: mf.ext, _stableDir: stableDir });
+    }
 
     return {
       parts: result.parts,
-      // Filter binary objects to only those referenced via media descriptors;
-      // if no media descriptors exist, include all binaries found.
-      mediaFiles: referencedStorageIds.size > 0
-        ? mediaFiles.filter((mf) => referencedStorageIds.has(mf.id))
-        : mediaFiles,
+      mediaFiles: stableMedia,
+      // Caller MUST call cleanup() after consuming mediaFiles to remove stableDir.
+      cleanup: () => { try { fs.rmSync(stableDir, { recursive: true, force: true }); } catch {} },
     };
   } finally {
-    // Clean up temp dir
+    // Clean up the original extraction temp dir (not the stable media dir)
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
   }
 }

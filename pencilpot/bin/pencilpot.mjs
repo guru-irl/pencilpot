@@ -314,19 +314,25 @@ pencilpot <command> [args] [--flags]
 Commands:
   new <name|dir> [--design <d>]          Scaffold a new .pencil project (starter design included)
   open <path.pencil|dir> [--no-window]   Start the runtime and open the editor
-                          [--port N]
-  import <file.penpot>                   Import a .penpot file as a design (native, no backend)
-         [--project <dir>]               Project directory (default: cwd)
+       [--port N] [--design <name>]      Open a specific design by name
+  import <file.penpot> [targetDir]       Import a .penpot file as a design (native, no backend)
+         [--project <dir>]               Project directory (default: cwd; bootstrapped if absent)
          [--name <design>]               Design name (default: file basename)
-  install-desktop                         Install as a desktop app (Task D3)
-  uninstall-desktop                       Remove the desktop app entry (Task D3)
+  designs <path.pencil|dir>              List designs in the project (marks the default)
+  set-default <path.pencil|dir> <name>   Set the default design
+  install-desktop                         Install as a desktop app
+  uninstall-desktop                       Remove the desktop app entry
   --help, -h                              Show this help
 
 Examples:
   pencilpot new my-design
   pencilpot open my-design/my-design.pencil
   pencilpot open my-design/ --port 8080 --no-window
+  pencilpot open my-design/ --design wireframes --no-window
   pencilpot import Wireframes.penpot --project my-design/ --name wireframes
+  pencilpot import Wireframes.penpot /tmp/new-project
+  pencilpot designs my-design/
+  pencilpot set-default my-design/ wireframes
 `.trim());
 }
 
@@ -336,7 +342,7 @@ Examples:
 async function cmdImport(positional, flags) {
   const filePath = positional[0];
   if (!filePath) {
-    console.error("Usage: pencilpot import <file.penpot> [--project <dir>] [--name <design>]");
+    console.error("Usage: pencilpot import <file.penpot> [targetDir] [--project <dir>] [--name <design>]");
     process.exit(1);
   }
 
@@ -346,17 +352,39 @@ async function cmdImport(positional, flags) {
     process.exit(1);
   }
 
-  // Resolve project dir
-  const projectArg = flags["project"] ? path.resolve(flags["project"]) : process.cwd();
-  const { resolveProject, addDesign } = await import("../store/project.mjs");
+  const { initProject, resolveProject, addDesign, setDefault } = await import("../store/project.mjs");
   const { writeDesign } = await import("../store/store.mjs");
+  const { createSession } = await import("../../headless-core/target/headless/penpot.js");
 
+  // Resolve project dir:
+  //   --project <dir>   explicit override
+  //   positional[1]     positional target dir (may not exist yet → bootstrap)
+  //   default           cwd
+  let projectArg;
+  if (flags["project"]) {
+    projectArg = path.resolve(flags["project"]);
+  } else if (positional[1]) {
+    projectArg = path.resolve(positional[1]);
+  } else {
+    projectArg = process.cwd();
+  }
+
+  // Try to resolve an existing project; if none exists, bootstrap one.
   let proj;
+  let bootstrapped = false;
   try {
     proj = resolveProject(projectArg);
-  } catch (e) {
-    console.error(`Error resolving project: ${e.message}`);
-    process.exit(1);
+  } catch {
+    // No project found — bootstrap one at projectArg.
+    const projDir = projectArg;
+    fs.mkdirSync(projDir, { recursive: true });
+    const projName = path.basename(projDir);
+    initProject(projDir, projName);
+    // Write a blank starter so the project has at least one design (not set as default yet).
+    // Actually we skip creating a stub "main" — the imported design will be the first and default.
+    proj = resolveProject(projDir);
+    bootstrapped = true;
+    console.log(`bootstrapped project "${projName}" at ${projDir}`);
   }
 
   // Derive design name from flag or filename
@@ -367,32 +395,96 @@ async function cmdImport(positional, flags) {
 
   // Native conversion: unzip → engine decode/assemble → serialize to EDN store
   const { importPenpot } = await import("../runtime/import-binfile.mjs");
-  const { parts, mediaFiles } = await importPenpot(absFile);
+  const { parts, mediaFiles, cleanup } = await importPenpot(absFile);
 
-  // Register + write design to project
-  const designDir = addDesign(proj.root, designName);
-  writeDesign(designDir, parts);
+  try {
+    // Register + write design to project
+    const designDir = addDesign(proj.root, designName);
+    writeDesign(designDir, parts);
 
-  // Copy media binary files into designDir/media/
-  if (mediaFiles.length > 0) {
-    const mediaDir = path.join(designDir, "media");
-    fs.mkdirSync(mediaDir, { recursive: true });
-    for (const { id, srcPath, ext } of mediaFiles) {
-      const dest = path.join(mediaDir, `${id}.${ext}`);
-      try {
-        fs.copyFileSync(srcPath, dest);
-      } catch (e) {
-        console.warn(`  warning: could not copy media ${id}.${ext}: ${e.message}`);
+    // Copy media binary files into designDir/media/ (srcPath is in a stable temp dir)
+    if (mediaFiles.length > 0) {
+      const mediaDir = path.join(designDir, "media");
+      fs.mkdirSync(mediaDir, { recursive: true });
+      for (const { id, srcPath, ext } of mediaFiles) {
+        const dest = path.join(mediaDir, `${id}.${ext}`);
+        try {
+          fs.copyFileSync(srcPath, dest);
+        } catch (e) {
+          console.warn(`  warning: could not copy media ${id}.${ext}: ${e.message}`);
+        }
       }
+      console.log(`  copied ${mediaFiles.length} media file(s) → ${mediaDir}`);
     }
-    console.log(`  copied ${mediaFiles.length} media file(s) → ${mediaDir}`);
+  } finally {
+    // Clean up the stable temp dir used for media staging
+    if (cleanup) cleanup();
   }
+
+  // Set the imported design as the project's default (makes it visible on open)
+  setDefault(proj.root, designName);
 
   // Summary
   const pageCount = Object.keys(parts.pages || {}).length;
   const compCount = Object.keys(parts.components || {}).length;
   console.log(`imported ${path.basename(absFile)} → designs/${designName} (native, no backend)`);
   console.log(`  pages: ${pageCount}  components: ${compCount}  media: ${mediaFiles.length}`);
+  console.log(`  default design → ${designName}`);
+}
+
+// ---------------------------------------------------------------------------
+// designs command — list a project's designs (mark the default)
+// ---------------------------------------------------------------------------
+async function cmdDesigns(positional, flags) {
+  const arg = positional[0];
+  if (!arg) {
+    console.error("Usage: pencilpot designs <path.pencil|dir>");
+    process.exit(1);
+  }
+  const { resolveProject } = await import("../store/project.mjs");
+  let proj;
+  try {
+    proj = resolveProject(path.resolve(arg));
+  } catch (e) {
+    console.error(`Error resolving project: ${e.message}`);
+    process.exit(1);
+  }
+  console.log(`Project: ${proj.name}  (${proj.root})`);
+  if (proj.designs.length === 0) {
+    console.log("  (no designs)");
+  } else {
+    for (const d of proj.designs) {
+      const marker = d.name === proj.default ? " (default)" : "";
+      console.log(`  ${d.name}${marker}`);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// set-default command — change the default design
+// ---------------------------------------------------------------------------
+async function cmdSetDefault(positional, flags) {
+  const arg = positional[0];
+  const designName = positional[1];
+  if (!arg || !designName) {
+    console.error("Usage: pencilpot set-default <path.pencil|dir> <design>");
+    process.exit(1);
+  }
+  const { resolveProject, setDefault } = await import("../store/project.mjs");
+  let proj;
+  try {
+    proj = resolveProject(path.resolve(arg));
+  } catch (e) {
+    console.error(`Error resolving project: ${e.message}`);
+    process.exit(1);
+  }
+  try {
+    setDefault(proj.root, designName);
+  } catch (e) {
+    console.error(`Error: ${e.message}`);
+    process.exit(1);
+  }
+  console.log(`default design → ${designName}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -414,6 +506,12 @@ switch (cmd) {
     break;
   case "import":
     await cmdImport(positional, flags);
+    break;
+  case "designs":
+    await cmdDesigns(positional, flags);
+    break;
+  case "set-default":
+    await cmdSetDefault(positional, flags);
     break;
   case "install-desktop":
     cmdInstallDesktop();
