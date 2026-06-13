@@ -1,7 +1,9 @@
-// Synthetic HTTP responses for boot/SaaS endpoints the SPA calls.
+// Synthetic HTTP responses for workspace/SaaS endpoints the SPA still calls
+// after the auth/dashboard layer was stripped in Phase 2.
 // Replays verbatim bodies from pencilpot/runtime/stub-data/ (copied from
-// Phase 0 recordings). get-enabled-flags returns empty [] (overriding 401).
-// get-profile replays an authenticated (non-zero id) body.
+// Phase 0 recordings). get-enabled-flags returns empty [].
+// Pruned stubs (Phase 2): get-profile, get-projects, get-team-recent-files,
+// get-file-libraries (shadowed by the real rpc.mjs handler).
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
