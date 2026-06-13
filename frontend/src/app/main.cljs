@@ -11,11 +11,9 @@
    [app.common.time :as ct]
    [app.common.transit :as t]
    [app.common.types.objects-map]
+   [app.common.uuid :as uuid]
    [app.config :as cf]
-   [app.main.data.auth :as da]
    [app.main.data.event :as ev]
-   [app.main.data.profile :as dp]
-   [app.main.data.websocket :as ws]
    [app.main.errors]
    [app.main.features :as feat]
    [app.main.rasterizer :as thr]
@@ -66,6 +64,23 @@
       ;; The rasterizer is used for the dashboard thumbnails
       (thr/init!))))
 
+;; pencilpot: seed a synthetic local profile so downstream code reading
+;; :profile from state never NPEs (no get-profile RPC is made).
+(defn- seed-local-profile
+  []
+  (ptk/reify ::seed-local-profile
+    ptk/UpdateEvent
+    (update [_ state]
+      (let [profile {:id       (uuid/next)
+                     :email    "local@pencilpot"
+                     :fullname "Local"
+                     :lang     ""
+                     :theme    "default"
+                     :props    {}}]
+        (-> state
+            (assoc :profile-id (:id profile))
+            (assoc :profile profile))))))
+
 (defn initialize
   []
   (ptk/reify ::initialize
@@ -76,29 +91,10 @@
     ptk/WatchEvent
     (watch [_ _ stream]
       (rx/merge
+       ;; Seed a local profile and initialize routing immediately — no get-profile RPC.
        (rx/of (ev/initialize)
-              (dp/refresh-profile))
-
-       ;; Watch for profile deletion events
-       (->> stream
-            (rx/filter dp/profile-deleted-event?)
-            (rx/map da/logged-out))
-
-       ;; Once profile is fetched, initialize all penpot application
-       ;; routes
-       (->> stream
-            (rx/filter dp/profile-fetched?)
-            (rx/take 1)
-            (rx/map #(rt/init-routes)))
-
-       ;; Once profile fetched and the current user is authenticated,
-       ;; proceed to initialize the websockets connection.
-       (->> stream
-            (rx/filter dp/profile-fetched?)
-            (rx/map deref)
-            (rx/filter dp/is-authenticated?)
-            (rx/take 1)
-            (rx/map #(ws/initialize)))
+              (seed-local-profile)
+              (rt/init-routes))
 
        (->> stream
             (rx/filter (ptk/type? ::feat/initialize))

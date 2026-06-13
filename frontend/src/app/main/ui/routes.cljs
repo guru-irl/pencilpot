@@ -7,43 +7,18 @@
 (ns app.main.ui.routes
   (:require
    [app.common.data.macros :as dm]
-   [app.common.uri :as u]
-   [app.common.uuid :as uuid]
    [app.config :as cf]
-   [app.main.data.team :as dtm]
-   [app.main.errors :as errors]
    [app.main.features :as features]
-   [app.main.repo :as rp]
    [app.main.router :as rt]
    [app.main.store :as st]
-   [app.util.storage :as storage]
+   [app.util.object :as obj]
    [beicon.v2.core :as rx]
    [cuerdas.core :as str]
    [potok.v2.core :as ptk]))
 
+;; pencilpot: auth/dashboard routes removed; only workspace + viewer are needed.
 (def routes
-  [["/auth"
-    ["/login"             :auth-login]
-    ["/register"          :auth-register]
-    ["/register/validate" :auth-register-validate]
-    ["/register/success"  :auth-register-success]
-    ["/recovery/request"  :auth-recovery-request]
-    ["/recovery"          :auth-recovery]
-    ["/verify-token"      :auth-verify-token]]
-
-   (when (contains? cf/flags :nitrate)
-     ["/subscribe-nitrate" :nitrate-entry])
-
-   ["/settings"
-    ["/profile"       :settings-profile]
-    ["/password"      :settings-password]
-    ["/feedback"      :settings-feedback]
-    ["/options"       :settings-options]
-    ["/subscriptions" :settings-subscription]
-    ["/integrations"  :settings-integrations]
-    ["/notifications" :settings-notifications]]
-
-   ["/frame-preview" :frame-preview]
+  [["/frame-preview" :frame-preview]
 
    ["/view" :viewer]
 
@@ -58,54 +33,27 @@
    ;; Used for export
    ["/render-sprite/:file-id" :render-sprite]
 
-   ["/dashboard"
-    ["/members"              :dashboard-members]
-    ["/invitations"          :dashboard-invitations]
-    ["/webhooks"             :dashboard-webhooks]
-    ["/settings"             :dashboard-settings]
-    ["/recent"               :dashboard-recent]
-    ["/search"               :dashboard-search]
-    ["/fonts"                :dashboard-fonts]
-    ["/fonts/providers"      :dashboard-font-providers]
-    ["/libraries"            :dashboard-libraries]
-    ["/files"                :dashboard-files]
-    ["/deleted" :dashboard-deleted]]
-
-   ["/dashboard/team/:team-id"
-    ["/members"              :dashboard-legacy-team-members]
-    ["/invitations"          :dashboard-legacy-team-invitations]
-    ["/webhooks"             :dashboard-legacy-team-webhooks]
-    ["/settings"             :dashboard-legacy-team-settings]
-    ["/projects"             :dashboard-legacy-projects]
-    ["/search"               :dashboard-legacy-search]
-    ["/fonts"                :dashboard-legacy-fonts]
-    ["/fonts/providers"      :dashboard-legacy-font-providers]
-    ["/libraries"            :dashboard-legacy-libraries]
-    ["/projects/:project-id" :dashboard-legacy-files]]
-
    ["/workspace" :workspace]
    ["/workspace/:project-id/:file-id" :workspace-legacy]])
 
 
-(defn- store-session-params
-  [{:keys [template plugin]}]
-  (binding [storage/*sync* true]
-    (when (some? template)
-      (swap! storage/session assoc
-             :template template))
-    (when (some? plugin)
-      (swap! storage/session assoc
-             :plugin-url plugin))))
+;; pencilpot: navigate to workspace using window.pencilpotFile when no other route matches.
+(defn- nav-to-pencilpot-workspace
+  []
+  (let [pf      (obj/get js/globalThis "pencilpotFile")
+        file-id (some-> pf (obj/get "fileId"))
+        team-id (some-> pf (obj/get "teamId"))]
+    (when (and file-id team-id)
+      (st/emit! (rt/nav :workspace {:file-id file-id :team-id team-id})))))
 
 (defn on-navigate
   [router path send-event-info?]
   (let [location        (.-location js/document)
-        [base-path qs]  (str/split path "?")
+        [base-path _]   (str/split path "?")
         location-path   (dm/str (.-origin location) (.-pathname location))
         valid-location? (= location-path (dm/str cf/public-uri))
         match           (rt/match router path)
-        empty-path?     (or (= base-path "") (= base-path "/"))
-        query-params    (u/query-string->map qs)]
+        empty-path?     (or (= base-path "") (= base-path "/"))]
 
     (cond
       (not valid-location?)
@@ -114,35 +62,9 @@
       (some? match)
       (st/emit! (rt/navigated match send-event-info?))
 
-      :else
-      ;; We just recheck with an additional profile request; this
-      ;; avoids some race conditions that causes unexpected redirects
-      ;; on invitations workflows (and probably other cases).
-      (->> (rp/cmd! :get-profile)
-           (rx/mapcat (fn [profile]
-                        (->> (rp/cmd! :get-teams {})
-                             (rx/map (fn [teams]
-                                       (assoc profile ::teams (into #{} (map :id) teams)))))))
-           (rx/subs! (fn [{:keys [id ::teams] :as profile}]
-                       (cond
-                         (= id uuid/zero)
-                         (do
-                           (store-session-params query-params)
-                           (st/emit! (rt/nav :auth-login)))
-
-                         empty-path?
-                         (let [team-id (dtm/get-last-team-id)]
-                           (if (contains? teams team-id)
-                             (st/emit! (rt/nav :dashboard-recent
-                                               (assoc query-params :team-id team-id)))
-                             (st/emit! (rt/nav :dashboard-recent
-                                               (assoc query-params :team-id (:default-team-id profile))))))
-
-                         :else
-                         (st/emit! (rt/assign-exception {:type :not-found}))))
-
-                     (fn [cause]
-                       (errors/on-error cause)))))))
+      ;; For root or any unknown path (incl. /auth/*) boot straight into the workspace.
+      (or empty-path? (not (some? match)))
+      (nav-to-pencilpot-workspace))))
 
 (defn init-routes
   []
