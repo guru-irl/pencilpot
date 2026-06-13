@@ -2,7 +2,7 @@
   "Canonical-EDN serializer/deserializer for the pencilpot on-disk store.
 
   Lossless: keywords, #uuid literals, sets, and Penpot record types (e.g.
-  TokensLib, PathData) all survive the round-trip.
+  TokensLib, PathData, Matrix, Point, Rect) all survive the round-trip.
   Deterministic: sorted-map-by print-representation ensures byte-identical
   output when data is unchanged, keeping git diffs minimal."
   (:require
@@ -10,7 +10,59 @@
    [clojure.pprint :as pp]
    [app.common.uuid :as uuid]
    [app.common.types.path :as path]
-   [app.common.types.tokens-lib :as ctob]))
+   [app.common.types.tokens-lib :as ctob]
+   [app.common.geom.matrix :as gmt]
+   [app.common.geom.point :as gpt]
+   [app.common.geom.rect :as grc]))
+
+;; ---------------------------------------------------------------------------
+;; Geometry tagged-literal wrapper
+;;
+;; In ClojureScript, pprint's type-dispatcher returns :map for ANY IMap
+;; implementor — including geometry records (Matrix, Point, Rect).  This means
+;; defmethod pp/simple-dispatch Matrix (which calls pr) is NEVER reached:
+;; pprint always takes the :map branch and formats records as plain maps
+;; {:a 1, :b 0, ...}, destroying type information.
+;;
+;; GeomTaggedLiteral is a plain deftype (not IMap) that wraps one geometry
+;; value and emits the Penpot tagged-literal form via IPrintWithWriter.
+;; Because it does not implement IMap, type-dispatcher returns :default, which
+;; calls pprint-simple-default → (pr-str obj) → IPrintWithWriter → the tag.
+;; ---------------------------------------------------------------------------
+
+(deftype GeomTaggedLiteral [tag repr]
+  Object
+  (toString [_] (str "#" tag " \"" repr "\""))
+
+  cljs.core/IPrintWithWriter
+  (-pr-writer [_ writer _opts]
+    (-write writer (str "#" tag " \"" repr "\""))))
+
+(defn- matrix->tagged-literal
+  "Wrap a Matrix record as a GeomTaggedLiteral that prints as
+  #penpot/matrix \"a,b,c,d,e,f\"."
+  [m]
+  (GeomTaggedLiteral.
+   "penpot/matrix"
+   (str (.-a m) "," (.-b m) "," (.-c m) "," (.-d m) "," (.-e m) "," (.-f m))))
+
+(defn- point->tagged-literal
+  "Wrap a Point record as a GeomTaggedLiteral that prints as
+  #penpot/point \"x,y\"."
+  [p]
+  (GeomTaggedLiteral.
+   "penpot/point"
+   (str (.-x p) "," (.-y p))))
+
+(defn- rect->tagged-literal
+  "Wrap a Rect record as a GeomTaggedLiteral that prints as
+  #penpot/rect \"x,y,width,height,x1,y1,x2,y2\".
+  All eight fields are serialised so round-trip is lossless."
+  [r]
+  (GeomTaggedLiteral.
+   "penpot/rect"
+   (str (.-x r) "," (.-y r) "," (.-width r) "," (.-height r)
+        "," (.-x1 r) "," (.-y1 r) "," (.-x2 r) "," (.-y2 r))))
 
 ;; ---------------------------------------------------------------------------
 ;; Canonical ordering helpers
@@ -24,16 +76,28 @@
 (defn- canon
   "Recursively turn every map into a sorted-map (keys ordered by pr-str) and
   every set into a sorted-set (elements ordered by pr-str).  Vectors and seqs
-  become vectors (preserving order).  Scalars pass through unchanged."
+  become vectors (preserving order).  Scalars pass through unchanged.
+
+  IMPORTANT: Penpot geometry records (Matrix, Point, Rect) implement IMap and
+  therefore satisfy map?.  We detect them BEFORE the plain-map branch and
+  wrap them in GeomTaggedLiteral so that pp/pprint emits the correct
+  tagged-literal form (#penpot/matrix, #penpot/point, #penpot/rect) rather
+  than flattening them to plain maps {:a 1, :b 0, …}.  Preserving the types
+  ensures that read-edn reconstructs real Matrix/Point/Rect instances, so
+  getFileResponse() transit-encodes them with the correct transit tags and the
+  frontend's geometry math never receives NaN transforms."
   [x]
   (cond
-    (map? x)    (into (sorted-map-by kcmp)
-                      (map (fn [[k v]] [k (canon v)]) x))
-    (set? x)    (into (sorted-set-by kcmp)
-                      (map canon x))
-    (vector? x) (mapv canon x)
-    (seq? x)    (mapv canon x)
-    :else       x))
+    (gmt/matrix? x) (matrix->tagged-literal x)
+    (gpt/point? x)  (point->tagged-literal x)
+    (grc/rect? x)   (rect->tagged-literal x)
+    (map? x)        (into (sorted-map-by kcmp)
+                          (map (fn [[k v]] [k (canon v)]) x))
+    (set? x)        (into (sorted-set-by kcmp)
+                          (map canon x))
+    (vector? x)     (mapv canon x)
+    (seq? x)        (mapv canon x)
+    :else           x))
 
 (defn canonical-edn
   "Return a deterministic, pretty-printed EDN string for `data`."
@@ -41,6 +105,10 @@
   (binding [cljs.pprint/*print-right-margin*  80
             cljs.core/*print-namespace-maps*  false]
     (with-out-str (pp/pprint (canon data)))))
+
+;; ---------------------------------------------------------------------------
+;; EDN tag readers
+;; ---------------------------------------------------------------------------
 
 (defn- edn-read-tokens-lib
   "EDN tag reader for #penpot/tokens-lib.
@@ -64,15 +132,49 @@
   (when (and v (seq v))
     (path/from-string v)))
 
+(defn- edn-read-matrix
+  "EDN tag reader for #penpot/matrix.
+
+  The tagged value is the string \"a,b,c,d,e,f\" written by
+  GeomTaggedLiteral.  We reuse gmt/str->matrix (Penpot's own parser) to
+  reconstruct the Matrix record — no hand-rolled matrix math."
+  [v]
+  (gmt/str->matrix v))
+
+(defn- edn-read-point
+  "EDN tag reader for #penpot/point.
+
+  The tagged value is the string \"x,y\" written by GeomTaggedLiteral.
+  We parse x,y and construct via gpt/point."
+  [v]
+  (let [[x y] (map js/parseFloat (.split v ","))]
+    (gpt/point x y)))
+
+(defn- edn-read-rect
+  "EDN tag reader for #penpot/rect.
+
+  The tagged value is the string \"x,y,width,height,x1,y1,x2,y2\" written
+  by GeomTaggedLiteral.  We parse the fields and construct via grc/make-rect
+  + assoc the x1/y1/x2/y2 fields explicitly."
+  [v]
+  (let [[x y width height x1 y1 x2 y2] (map js/parseFloat (.split v ","))]
+    (grc/map->Rect {:x x :y y :width width :height height
+                    :x1 x1 :y1 y1 :x2 x2 :y2 y2})))
+
 (defn read-edn
   "Parse an EDN string produced by `canonical-edn`.  Supports the #uuid
   tagged literal and all Penpot tagged literals that appear in file :data
-  (#penpot/tokens-lib and #penpot/path-data)."
+  (#penpot/tokens-lib, #penpot/path-data, #penpot/matrix, #penpot/point,
+  #penpot/rect)."
   [s]
-  (reader/read-string {:readers {'uuid              uuid/uuid
-                                 'penpot/tokens-lib edn-read-tokens-lib
-                                 'penpot/path-data  edn-read-path-data}}
-                      s))
+  (reader/read-string
+   {:readers {'uuid              uuid/uuid
+              'penpot/tokens-lib edn-read-tokens-lib
+              'penpot/path-data  edn-read-path-data
+              'penpot/matrix     edn-read-matrix
+              'penpot/point      edn-read-point
+              'penpot/rect       edn-read-rect}}
+   s))
 
 ;; ---------------------------------------------------------------------------
 ;; Public API
