@@ -402,17 +402,27 @@
                revn     (get st :revn 0)
                vern     (get st :vern 0)
                nm       (get st :name "Pencilpot File")
+               ;; pencilpot's frontend is always the modern (components/v2 + wasm) build, so the
+               ;; served file MUST declare the modern feature set — otherwise the SPA treats it as
+               ;; a legacy file and the options/design panel renders empty.  Crucially this is a SET
+               ;; (active-feature? uses contains?, which on a vector checks indices, not membership).
+               served-features (into #{"fdata/shape-data-type" "fdata/path-data" "styles/v2"
+                                       "layout/grid" "components/v2" "plugins/runtime"
+                                       "design-tokens/v1" "tokens/numeric-input" "variants/v1"
+                                       "render-wasm/v1" "text-editor/v2" "text-editor-wasm/v1"}
+                                     (map str (or features [])))
                meta-m   {:id       (str file-id)
                          :name     nm
                          :revn     revn
                          :vern     vern
-                         :features (vec features)}
+                         :features served-features}
                resp     (if envelope
                           ;; Full round-trip: restore the original envelope + live :data
                           (-> envelope
                               (assoc :data data)
                               (assoc :revn revn)
-                              (assoc :vern vern))
+                              (assoc :vern vern)
+                              (assoc :features served-features))
                           (assoc meta-m :data data))
                body     (t/encode-str resp)]
            (js/JSON.stringify (clj->js {:meta meta-m :transit body}))))})
