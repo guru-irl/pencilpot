@@ -473,6 +473,10 @@ Commands:
   set-default <path.pencil|dir> <name>   Set the default design
   add-font <fontfile> [--project <dir>]  Add a custom font file to the project
            [--family <name>] [--weight 400] [--style normal] [--id <fontId>]
+  add-variable-font <fontfile>           Add a variable font; discovers axes +
+           [--project <dir>] [--family <name>] [--id <fontId>]   named instances from fvar
+  add-google <Family> [--project <dir>]  Fetch + register a Google font
+           [--variable] [--weights 100..900] [--axes wght,wdth]
   fonts <path.pencil|dir>               List added fonts + report missing families
   retarget-fonts <project> [--family "Name=fontId" …]
                                          Rewrite every font-id ref in the design to a
@@ -491,6 +495,9 @@ Examples:
   pencilpot designs my-design/
   pencilpot set-default my-design/ wireframes
   pencilpot add-font MyFont.ttf --project my-design/ --family "My Font" --weight 400
+  pencilpot add-variable-font GoogleSansFlex.ttf --project my-design/
+  pencilpot add-google Roboto --project my-design/ --weights 400,700
+  pencilpot add-google "Roboto Flex" --project my-design/ --variable --axes wght,wdth
   pencilpot fonts my-design/
 `.trim());
 }
@@ -712,6 +719,245 @@ async function cmdAddFont(positional, flags) {
 }
 
 // ---------------------------------------------------------------------------
+// add-variable-font command — register a variable font + its axis metadata
+// ---------------------------------------------------------------------------
+async function cmdAddVariableFont(positional, flags) {
+  const fontFile = positional[0];
+  if (!fontFile) {
+    console.error("Usage: pencilpot add-variable-font <fontfile> [--project <dir>] [--family <name>] [--id <fontId>]");
+    process.exit(1);
+  }
+
+  const absFontFile = path.resolve(fontFile);
+  if (!fs.existsSync(absFontFile)) {
+    console.error(`Font file not found: ${absFontFile}`);
+    process.exit(1);
+  }
+
+  const { resolveProject } = await import("../store/project.mjs");
+  const { addVariableFont } = await import("../store/fonts.mjs");
+  const { readFvar, readFontFamilyName } = await import("../store/fvar.mjs");
+
+  // Resolve project: --project flag or walk up from cwd
+  const projectArg = flags["project"] ? path.resolve(flags["project"]) : process.cwd();
+  let proj;
+  try {
+    proj = resolveProject(projectArg);
+  } catch (e) {
+    console.error(`Error: no project found at ${projectArg}. Run 'pencilpot new' first or pass --project <dir>.`);
+    process.exit(1);
+  }
+
+  // Parse the variable-font axes + instances out of the file.
+  let fvar;
+  const buffer = fs.readFileSync(absFontFile);
+  try {
+    fvar = readFvar(buffer);
+  } catch (e) {
+    console.error(`error: ${e.message}`);
+    process.exit(1);
+  }
+
+  // Family precedence: --family (first value if array) → name table → filename.
+  let family = flags["family"];
+  if (Array.isArray(family)) family = family[0];
+  if (!family) {
+    family = readFontFamilyName(buffer) ?? undefined;
+  }
+  if (!family) {
+    family = path.basename(absFontFile, path.extname(absFontFile)).replace(/[-_]+/g, " ");
+  }
+
+  const fontId = flags["id"] ?? undefined;
+
+  const variant = addVariableFont(proj.root, {
+    file: absFontFile,
+    family,
+    fontId,
+    axes: fvar.axes,
+    instances: fvar.instances,
+  });
+
+  console.log(`added variable font:`);
+  console.log(`  family:  ${variant.family}`);
+  console.log(`  id:      ${variant.id}`);
+  console.log(`  format:  ${variant.format}`);
+  console.log(`  file:    fonts/${variant.file}`);
+  console.log(`  axes (${fvar.axes.length}):`);
+  for (const a of fvar.axes) {
+    console.log(`    ${a.tag.padEnd(4)}  ${a.min} .. ${a.default} .. ${a.max}   ${a.name}`);
+  }
+  if (fvar.instances.length > 0) {
+    console.log(`  named instances (${fvar.instances.length}):`);
+    for (const inst of fvar.instances) {
+      const coords = Object.entries(inst.coords).map(([t, v]) => `${t}=${v}`).join(" ");
+      console.log(`    ${inst.name}  [${coords}]`);
+    }
+  } else {
+    console.log(`  named instances: (none)`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// add-google command — fetch + register a Google font (static or variable)
+// ---------------------------------------------------------------------------
+async function cmdAddGoogle(positional, flags) {
+  const family = positional[0];
+  if (!family) {
+    console.error("Usage: pencilpot add-google <Family> [--project <dir>] [--variable] [--weights 100..900] [--axes wght,wdth]");
+    process.exit(1);
+  }
+
+  const { resolveProject } = await import("../store/project.mjs");
+  const { addFont, addVariableFont } = await import("../store/fonts.mjs");
+  const { buildCSS2URL } = await import("../runtime/gfonts.mjs");
+  const { readFvar } = await import("../store/fvar.mjs");
+
+  const projectArg = flags["project"] ? path.resolve(flags["project"]) : process.cwd();
+  let proj;
+  try {
+    proj = resolveProject(projectArg);
+  } catch (e) {
+    console.error(`error: no project found at ${projectArg}. Run 'pencilpot new' first or pass --project <dir>.`);
+    process.exit(1);
+  }
+
+  const variable = flags["variable"] === true;
+  const weights = flags["weights"];           // e.g. "100..900" | "400,700"
+  const axesFlag = flags["axes"];             // e.g. "wght,wdth"
+
+  const css2Url = buildCSS2URL(family, { variable, weights, axes: axesFlag });
+
+  const DESKTOP_UA =
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+  /** Fetch with a desktop UA + timeout; throws on non-2xx or network failure. */
+  async function fetchWithTimeout(url, asBuffer = false, timeoutMs = 15000) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, { signal: ctrl.signal, headers: { "User-Agent": DESKTOP_UA } });
+      if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
+      return asBuffer ? Buffer.from(await res.arrayBuffer()) : await res.text();
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  console.log(`fetching ${css2Url}`);
+
+  let css;
+  try {
+    css = await fetchWithTimeout(css2Url);
+  } catch (e) {
+    console.error(`error: could not fetch Google Fonts CSS (${e.message})`);
+    process.exit(1);
+  }
+
+  // Parse the CSS per @font-face block so we can associate each src url with its
+  // font-weight. Google emits one block per (weight × unicode-subset); the font
+  // file is identical across subsets, so we dedup by font-weight and keep the
+  // first url for each.  All `src: url(...)` entries are also collected raw for
+  // the variable path (which expects a single VF file).
+  const urls = [];                        // all gstatic urls (in document order)
+  const byWeight = new Map();             // weight(number) → first url
+  for (const block of css.split("@font-face")) {
+    const um = block.match(/url\((https:\/\/fonts\.gstatic\.com\/[^)'"]+)\)/);
+    if (!um) continue;
+    const url = um[1];
+    urls.push(url);
+    const wm = block.match(/font-weight:\s*([^;]+);/);
+    // font-weight may be a single value ("400") or a range ("100 900") for VF.
+    const w = wm ? Number(String(wm[1]).trim().split(/\s+/)[0]) : 400;
+    if (!byWeight.has(w)) byWeight.set(w, url);
+  }
+  if (urls.length === 0) {
+    console.error("error: no font src URLs found in Google Fonts CSS response");
+    process.exit(1);
+  }
+
+  // Temp dir for downloaded font files.
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pp-gfont-"));
+
+  try {
+    if (variable) {
+      // Variable: a single VF file is expected. Use the first src URL.
+      const url = urls[0];
+      const ext = (url.match(/\.(woff2|woff|ttf|otf)(\?|$)/i) || [, "woff2"])[1].toLowerCase();
+      let buf;
+      try {
+        buf = await fetchWithTimeout(url, true);
+      } catch (e) {
+        console.error(`error: could not download variable font (${e.message})`);
+        process.exit(1);
+      }
+      const tmpFile = path.join(tmpDir, `${family.replace(/\s+/g, "")}.${ext}`);
+      fs.writeFileSync(tmpFile, buf);
+
+      // Axis discovery: parse fvar from ttf/otf; for woff2 we cannot parse the
+      // compressed table without a decompressor, so fall back to the requested
+      // --axes (documented limitation).
+      let axes = [];
+      let instances = [];
+      if (ext === "ttf" || ext === "otf") {
+        try {
+          const fvar = readFvar(buf);
+          axes = fvar.axes;
+          instances = fvar.instances;
+        } catch (e) {
+          console.warn(`  note: could not parse fvar from ${ext} (${e.message}); using requested axes`);
+        }
+      } else {
+        console.warn(`  note: ${ext} is compressed — fvar not parsed; deriving axes from --axes/CSS request`);
+      }
+
+      if (axes.length === 0) {
+        // Build minimal axes from the requested --axes tags (range unknown → wide).
+        const tags = axesFlag
+          ? String(axesFlag).split(",").map((s) => s.trim()).filter(Boolean)
+          : ["wght"];
+        axes = tags.map((tag) => ({
+          tag,
+          min: tag === "wght" ? 100 : 0,
+          default: tag === "wght" ? 400 : 0,
+          max: tag === "wght" ? 900 : 1,
+          name: tag,
+        }));
+      }
+
+      const variant = addVariableFont(proj.root, {
+        file: tmpFile, family, axes, instances,
+      });
+      console.log(`added variable font "${variant.family}" (id=${variant.id}, ${variant.format})`);
+      console.log(`  axes: ${axes.map((a) => a.tag).join(", ")}`);
+      if (instances.length > 0) console.log(`  named instances: ${instances.length}`);
+    } else {
+      // Static: one variant per distinct font-weight in the CSS (the unicode
+      // subsets share one file, deduped above into byWeight).
+      let added = 0;
+      for (const [weight, url] of [...byWeight.entries()].sort((a, b) => a[0] - b[0])) {
+        const ext = (url.match(/\.(woff2|woff|ttf|otf)(\?|$)/i) || [, "woff2"])[1].toLowerCase();
+        let buf;
+        try {
+          buf = await fetchWithTimeout(url, true);
+        } catch (e) {
+          console.error(`error: could not download font (${e.message})`);
+          process.exit(1);
+        }
+        const tmpFile = path.join(tmpDir, `${family.replace(/\s+/g, "")}-${weight}.${ext}`);
+        fs.writeFileSync(tmpFile, buf);
+        const variant = addFont(proj.root, { file: tmpFile, family, weight, style: "normal" });
+        console.log(`  added ${variant.family} ${variant.weight} ${variant.style} [${variant.format}] id=${variant.id}`);
+        added++;
+      }
+      console.log(`added ${added} static variant(s) for "${family}"`);
+    }
+  } finally {
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+  }
+}
+
+// ---------------------------------------------------------------------------
 // fonts command — list added fonts and missing fonts in designs
 // ---------------------------------------------------------------------------
 async function cmdFonts(positional, flags) {
@@ -801,6 +1047,12 @@ switch (cmd) {
     break;
   case "add-font":
     await cmdAddFont(positional, flags);
+    break;
+  case "add-variable-font":
+    await cmdAddVariableFont(positional, flags);
+    break;
+  case "add-google":
+    await cmdAddGoogle(positional, flags);
     break;
   case "retarget-fonts":
     await cmdRetargetFonts(positional, flags);

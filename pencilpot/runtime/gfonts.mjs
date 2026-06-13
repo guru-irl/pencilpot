@@ -117,6 +117,105 @@ function familyParamToCSS2(familyParam) {
   return legacyToCSS2(family, variantIds);
 }
 
+// ── CSS2 URL builder (offline-testable) ───────────────────────────────────────
+
+/** The five registered (lowercase) Google Fonts axes. */
+const REGISTERED_AXES = new Set(["ital", "opsz", "slnt", "wdth", "wght"]);
+
+/**
+ * Compare two axis tags by the Google Fonts CSS2 ordering rule:
+ *   registered (lowercase) axes first, sorted alphabetically, then custom
+ *   (uppercase) axes, sorted alphabetically.
+ */
+function compareAxisTags(a, b) {
+  const aReg = REGISTERED_AXES.has(a);
+  const bReg = REGISTERED_AXES.has(b);
+  if (aReg !== bReg) return aReg ? -1 : 1;
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/**
+ * Expand a weight spec into an explicit list string for CSS2.
+ *   "100..900" → "100;200;300;400;500;600;700;800;900"  (100-step range)
+ *   "400,700"  → "400;700"
+ *   400        → "400"
+ *   [400,700]  → "400;700"
+ */
+function expandWeights(weights) {
+  if (weights == null) return "400";
+  if (Array.isArray(weights)) return weights.join(";");
+  const s = String(weights).trim();
+  const range = s.match(/^(\d+)\.\.(\d+)$/);
+  if (range) {
+    const lo = Number(range[1]);
+    const hi = Number(range[2]);
+    const list = [];
+    for (let w = lo; w <= hi; w += 100) list.push(w);
+    return list.join(";");
+  }
+  // Comma list (or single value)
+  return s.split(",").map((x) => x.trim()).filter(Boolean).join(";");
+}
+
+/**
+ * Build a Google Fonts CSS2 request URL (pure; no network).
+ *
+ * @param {string} family  font family name (spaces allowed)
+ * @param {object} [opts]
+ * @param {boolean} [opts.variable]  build a variable-font request
+ * @param {string|number|Array} [opts.weights]  weight spec for static requests
+ *        (range "a..b" → 100-step list; comma list; array; single)
+ * @param {string|string[]} [opts.axes]  axis tags for variable requests
+ *        (comma string "wght,wdth" or array). Each registered axis gets a
+ *        `min..max` range; for the common case we request the full wght range.
+ * @returns {string} e.g. "https://fonts.googleapis.com/css2?family=Roboto:wght@400"
+ *
+ * Variable:
+ *   - no axes given  → "Family:wght@100..900" (full weight axis)
+ *   - axes given     → "Family:<tag1>,<tag2>,…@<r1>,<r2>,…" with axes sorted
+ *                      registered-lowercase-alpha then custom-uppercase-alpha,
+ *                      each registered axis mapped to its conventional range and
+ *                      custom axes to "0..1".
+ * Static:
+ *   - "Family:wght@<list>" from the weights spec.
+ */
+export function buildCSS2URL(family, { variable = false, weights, axes } = {}) {
+  const BASE = "https://fonts.googleapis.com/css2";
+
+  // Conventional full ranges for registered axes (used when only a tag list is
+  // supplied without explicit bounds).
+  const AXIS_RANGE = {
+    wght: "100..900",
+    wdth: "75..125",
+    opsz: "8..144",
+    slnt: "-10..0",
+    ital: "0..1",
+  };
+
+  let spec;
+  if (variable) {
+    let tags;
+    if (axes == null) {
+      tags = ["wght"];
+    } else if (Array.isArray(axes)) {
+      tags = axes.slice();
+    } else {
+      tags = String(axes).split(",").map((s) => s.trim()).filter(Boolean);
+    }
+    if (tags.length === 0) tags = ["wght"];
+    tags.sort(compareAxisTags);
+
+    const tagList = tags.join(",");
+    const ranges = tags.map((t) => AXIS_RANGE[t] ?? "0..1").join(",");
+    spec = `${family}:${tagList}@${ranges}`;
+  } else {
+    const list = expandWeights(weights);
+    spec = `${family}:wght@${list}`;
+  }
+
+  return `${BASE}?family=${encodeURIComponent(spec)}`;
+}
+
 // ── CSS rewriting ─────────────────────────────────────────────────────────────
 
 /**

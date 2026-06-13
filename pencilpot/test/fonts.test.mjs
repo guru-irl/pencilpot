@@ -450,3 +450,164 @@ test("/internal/gfonts/font/* proxies gstatic font bytes (requires internet)", a
     await new Promise((r) => child.on("exit", r));
   }
 });
+
+// ── Stage 2: variable fonts ──────────────────────────────────────────────────
+
+const VF_FIXTURE = "/mnt/data/src/DefaultLauncher/fonts/_variable/GoogleSansFlex.ttf";
+
+test("addVariableFont round-trips axes + instances via readFonts", async (t) => {
+  if (!fs.existsSync(VF_FIXTURE)) return t.skip(`fixture missing: ${VF_FIXTURE}`);
+
+  const dir = makeProject(tmp());
+  const { addVariableFont, readFonts } = await import("../store/fonts.mjs");
+  const { readFvar } = await import("../store/fvar.mjs");
+
+  const { axes, instances } = readFvar(fs.readFileSync(VF_FIXTURE));
+  const variant = addVariableFont(dir, {
+    file: VF_FIXTURE,
+    family: "Google Sans Flex",
+    axes,
+    instances,
+  });
+
+  // Returned descriptor carries the variable shape
+  assert.equal(variant.variable, true, "variant.variable is true");
+  assert.equal(variant.id, "vf-google-sans-flex", "fontId defaults to vf-<slug>");
+  assert.equal(variant.fontId, variant.id, "fontId equals id");
+  assert.ok(variant.axes.length > 0, "axes present");
+  assert.ok(variant.instances.length > 0, "instances present");
+
+  // Font file copied
+  assert.ok(fs.existsSync(path.join(dir, "fonts", variant.file)), "font file copied");
+
+  // readFonts passes the variable keys through unchanged
+  const fonts = readFonts(dir);
+  assert.equal(fonts.length, 1, "one variant");
+  const v = fonts[0];
+  assert.equal(v.variable, true, "readFonts preserves variable");
+  assert.deepEqual(v.axes, axes, "readFonts preserves axes");
+  assert.deepEqual(v.instances, instances, "readFonts preserves instances");
+
+  // Idempotent re-add
+  addVariableFont(dir, { file: VF_FIXTURE, family: "Google Sans Flex", axes, instances });
+  assert.equal(readFonts(dir).length, 1, "re-add stays at one variant");
+});
+
+test("addVariableFont omits instances key when none are supplied", async (t) => {
+  if (!fs.existsSync(VF_FIXTURE)) return t.skip(`fixture missing: ${VF_FIXTURE}`);
+  const dir = makeProject(tmp());
+  const { addVariableFont } = await import("../store/fonts.mjs");
+  const { readFvar } = await import("../store/fvar.mjs");
+  const { axes } = readFvar(fs.readFileSync(VF_FIXTURE));
+  const variant = addVariableFont(dir, { file: VF_FIXTURE, family: "VF NoInst", axes, instances: [] });
+  assert.ok(!("instances" in variant), "no instances key when empty");
+});
+
+test("encodeTransitFontVariants emits ~:variable/~:axes/~:instances for variable variants", async () => {
+  const { encodeTransitFontVariants } = await import("../runtime/rpc.mjs");
+  const variants = [{
+    id: "vf-demo", fontId: "vf-demo", family: "Demo VF", weight: 400, style: "normal",
+    format: "ttf", variable: true,
+    axes: [
+      { tag: "wght", min: 100, default: 400, max: 900, name: "Weight" },
+      { tag: "wdth", min: 75, default: 100, max: 125, name: "Width" },
+    ],
+    instances: [
+      { name: "Regular", coords: { wght: 400, wdth: 100 } },
+      { name: "Bold", coords: { wght: 700, wdth: 100 } },
+    ],
+  }];
+  const arr = JSON.parse(encodeTransitFontVariants(variants));
+  const map = arr[0];
+  const keys = map.filter((_, i) => i > 0 && i % 2 === 1);
+  assert.ok(keys.includes("~:variable"), "has ~:variable");
+  assert.ok(keys.includes("~:axes"), "has ~:axes");
+  assert.ok(keys.includes("~:instances"), "has ~:instances");
+
+  // ~:variable value is true
+  const variableIdx = map.indexOf("~:variable");
+  assert.equal(map[variableIdx + 1], true, "~:variable === true");
+
+  // ~:axes is a list of transit maps with tag/min/max/default/name
+  const axesVal = map[map.indexOf("~:axes") + 1];
+  assert.equal(axesVal.length, 2, "two axes encoded");
+  const ax0 = axesVal[0];
+  assert.equal(ax0[0], "^ ", "axis is a transit map");
+  const axKeys = ax0.filter((_, i) => i > 0 && i % 2 === 1);
+  for (const k of ["~:tag", "~:min", "~:max", "~:default", "~:name"]) {
+    assert.ok(axKeys.includes(k), `axis has ${k}`);
+  }
+
+  // ~:instances → maps with ~:name + ~:coords (coords is a transit map)
+  const instVal = map[map.indexOf("~:instances") + 1];
+  assert.equal(instVal.length, 2, "two instances encoded");
+  const inst0 = instVal[0];
+  assert.equal(inst0[inst0.indexOf("~:name") + 1], "Regular", "instance name");
+  const coords = inst0[inst0.indexOf("~:coords") + 1];
+  assert.equal(coords[0], "^ ", "coords is a transit map");
+  assert.equal(coords[coords.indexOf("~:wght") + 1], 400, "coord wght=400");
+});
+
+test("encodeTransitFontVariants omits variable keys for static variants (byte-identical)", async () => {
+  const { encodeTransitFontVariants } = await import("../runtime/rpc.mjs");
+  const variants = [{
+    id: "demo-400-normal", fontId: "demo-400-normal", family: "Demo",
+    weight: 400, style: "normal", format: "ttf",
+  }];
+  const arr = JSON.parse(encodeTransitFontVariants(variants));
+  const keys = arr[0].filter((_, i) => i > 0 && i % 2 === 1);
+  assert.ok(!keys.includes("~:variable"), "no ~:variable for static");
+  assert.ok(!keys.includes("~:axes"), "no ~:axes for static");
+  assert.ok(!keys.includes("~:instances"), "no ~:instances for static");
+
+  // Exact expected static encoding (locks the byte-identical contract).
+  const expected = JSON.stringify([[
+    "^ ",
+    "~:id", "demo-400-normal",
+    "~:font-id", "demo-400-normal",
+    "~:font-family", "Demo",
+    "~:font-weight", 400,
+    "~:font-style", "normal",
+    "~:woff2-file-id", "demo-400-normal",
+    "~:woff1-file-id", "demo-400-normal",
+    "~:ttf-file-id", "demo-400-normal",
+    "~:otf-file-id", "demo-400-normal",
+  ]]);
+  assert.equal(JSON.stringify(arr), expected, "static encoding unchanged");
+});
+
+// ── Stage 2: buildCSS2URL unit cases ─────────────────────────────────────────
+
+test("buildCSS2URL static: single weight", async () => {
+  const { buildCSS2URL } = await import("../runtime/gfonts.mjs");
+  const url = buildCSS2URL("Roboto", {});
+  assert.equal(url, "https://fonts.googleapis.com/css2?family=Roboto%3Awght%40400");
+});
+
+test("buildCSS2URL static: comma weight list", async () => {
+  const { buildCSS2URL } = await import("../runtime/gfonts.mjs");
+  const url = buildCSS2URL("Roboto", { weights: "400,700" });
+  assert.equal(decodeURIComponent(url), "https://fonts.googleapis.com/css2?family=Roboto:wght@400;700");
+});
+
+test("buildCSS2URL static: range weights expand to 100-step list", async () => {
+  const { buildCSS2URL } = await import("../runtime/gfonts.mjs");
+  const url = buildCSS2URL("Inter", { weights: "100..400" });
+  assert.equal(decodeURIComponent(url), "https://fonts.googleapis.com/css2?family=Inter:wght@100;200;300;400");
+});
+
+test("buildCSS2URL variable: default wght range when no axes given", async () => {
+  const { buildCSS2URL } = await import("../runtime/gfonts.mjs");
+  const url = buildCSS2URL("Roboto Flex", { variable: true });
+  assert.equal(decodeURIComponent(url), "https://fonts.googleapis.com/css2?family=Roboto Flex:wght@100..900");
+});
+
+test("buildCSS2URL variable: axes sorted registered-then-custom alpha", async () => {
+  const { buildCSS2URL } = await import("../runtime/gfonts.mjs");
+  // custom GRAD (uppercase) must sort after registered wght/wdth (lowercase)
+  const url = buildCSS2URL("Roboto Flex", { variable: true, axes: "GRAD,wght,wdth" });
+  const spec = decodeURIComponent(url).split("family=")[1];
+  // tag list before '@'
+  const tagList = spec.split("@")[0].split(":")[1];
+  assert.equal(tagList, "wdth,wght,GRAD", `tag order: ${tagList}`);
+});

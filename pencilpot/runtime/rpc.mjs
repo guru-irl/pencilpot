@@ -175,15 +175,16 @@ function encodeTransitLibraryList(libs) {
  * the others to null so the frontend skips them.  The variant id is used as
  * the file-id so the asset route /assets/by-id/<id> resolves it directly.
  */
-function encodeTransitFontVariants(variants) {
-  const arr = variants.map(({ id, fontId, family, weight, style, format }) => {
+export function encodeTransitFontVariants(variants) {
+  const arr = variants.map((v) => {
+    const { id, fontId, family, weight, style, variable, axes, instances } = v;
     // Penpot's custom-font @font-face builds its URL from :woff1-file-id (see
     // fonts.cljs generate-custom-font-variant-css).  We only ever have one file
     // per variant, served by /assets/by-id/<id> with the correct content-type, so
     // point ALL the *-file-id slots at the same id — whichever the loader reads,
     // the URL resolves to the real file (the browser sniffs the actual format).
     const woff2 = id, woff1 = id, ttf = id, otf = id;
-    return [
+    const map = [
       "^ ",
       "~:id",           id,
       "~:font-id",      fontId ?? id,
@@ -195,6 +196,34 @@ function encodeTransitFontVariants(variants) {
       "~:ttf-file-id",   ttf,
       "~:otf-file-id",   otf,
     ];
+
+    // Variable fonts: append axis + instance metadata after the file-id slots.
+    // Static variants are byte-identical to the pre-Stage-2 output (no new keys).
+    if (variable) {
+      map.push("~:variable", true);
+      const axesEnc = (axes ?? []).map((a) => [
+        "^ ",
+        "~:tag",     a.tag,
+        "~:min",     a.min,
+        "~:max",     a.max,
+        "~:default", a.default,
+        "~:name",    a.name ?? a.tag,
+      ]);
+      map.push("~:axes", axesEnc);
+
+      if (Array.isArray(instances) && instances.length > 0) {
+        const instEnc = instances.map((inst) => {
+          const coordMap = ["^ "];
+          for (const [tag, val] of Object.entries(inst.coords ?? {})) {
+            coordMap.push(`~:${tag}`, val);
+          }
+          return ["^ ", "~:name", inst.name ?? "", "~:coords", coordMap];
+        });
+        map.push("~:instances", instEnc);
+      }
+    }
+
+    return map;
   });
   return JSON.stringify(arr);
 }
