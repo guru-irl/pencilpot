@@ -15,13 +15,15 @@ Make pencilpot a *better* type tool than upstream Penpot:
 Variable fonts touch every layer (per `Explore` mapping):
 - **Model** (`common/types/text.cljc`, `typography.cljc`): only `:font-weight`/`:font-style`/`:font-variant-id` — **no axes field**.
 - **Render-wasm/Skia** (`render-wasm/src/shapes/fonts.rs`, `render/text.rs`, `wasm/text.rs`): `FontFamily` = id/weight/style; fixed-size text span; Skia supports variations (`FontArguments`/`setVariationDesignPosition`) but Penpot doesn't call them. **Hardest lift; needs Rust + render-wasm rebuild.**
-- **Loading** (`frontend/.../fonts.cljs`): `@font-face` has no `font-variation-settings`; custom → `assets/by-id/<id>`; google → `internal/gfonts/css` + `internal/gfonts/font` proxy.
+- **Loading** (`frontend/.../fonts.cljs`): `@font-face` has no `font-variation-settings`; custom → `assets/by-id/<id>`; google → `internal/gfonts/css` + `internal/gfonts/font` proxy. **Penpot uses the LEGACY Google Fonts `css` API** (`generate-gfonts-url` builds `family=<Family>:400,700italic&display=block` — discrete variant ids), NOT **CSS2** (`https://fonts.googleapis.com/css2?family=Family:ital,wght@0,400;1,700`, axis RANGES `wght@100..900`, custom axes, and `font-variation-settings` in the returned `@font-face`). This is a root reason variable fonts don't work. **pencilpot will use CSS2.**
+- **CRITICAL CURRENT GAP**: pencilpot stripped the backend, so the runtime serves NEITHER `internal/gfonts/css` NOR `internal/gfonts/font` → **Google fonts don't load at all** in pencilpot today (even `gfont-` families like google-sans-code/danfo fall back). The runtime must serve these (proxy to Google, via CSS2).
 - **UI** (`.../sidebar/options/menus/typography.cljs`): variant dropdown only.
 
 ## 3. Stages
 
-### Stage 1 — Custom font support (foundation; discrete model)
-Unblocks imported custom fonts immediately, no model/render changes.
+### Stage 1 — Custom fonts + make Google fonts load (CSS2 proxy)
+Unblocks imported custom fonts AND the currently-broken Google-font loading; no model/render changes yet.
+- **Google-fonts proxy (NEW, urgent):** the runtime serves `internal/gfonts/css` + `internal/gfonts/font`, proxying to Google's **CSS2** endpoint (`fonts.googleapis.com/css2`) + `fonts.gstatic.com`, rewriting font URLs through `internal/gfonts/font`. Translate the frontend's legacy `family=X:400,700italic` query → CSS2 (`family=X:ital,wght@0,400;1,700`). This makes `gfont-` families render (the user's design uses google-sans-code/danfo). CSS2 also returns variable-aware `@font-face`, setting up Stage 3.
 - **Store**: `pencilpot/store/fonts.mjs` — a project `fonts/` dir + `fonts.json` (`{variants:[{id,fontId,family,weight,style,file,format,axes?}]}`) + binaries. `readFonts`, `addFont`.
 - **CLI**: `pencilpot add-font <file> [--project] [--family] [--weight] [--style] [--id]`; `pencilpot fonts <project>` (list added + list families referenced-but-missing by the designs).
 - **Runtime**: `get-font-variants` returns the project's variants in Penpot's recorded shape (with `*-file-id`s the runtime can resolve); serve the `assets/by-id/<id>` font-file route (right `font/woff2|ttf|otf` content-type). Empty list stays valid.
