@@ -1,59 +1,67 @@
 // pencilpot live-update: fs-watch the open design dir and push SSE "reload"
 // events to all connected browser clients when external changes are detected.
 //
-// Self-write suppression: the SPA's own update-file writes must NOT trigger a
-// reload loop.  Call noteSelfWrite() immediately before any write that
-// originates from the SPA (rpc.mjs update-file handler) — changes detected
-// within SELF_WRITE_WINDOW_MS of that call are silently ignored.
+// Self-write suppression is CONTENT-BASED, not timing-based.  The runtime keeps
+// a signature (content hash of every .edn file) of the design as it last wrote /
+// observed it.  A reload is broadcast only when the on-disk content actually
+// DIFFERS from that signature — so the SPA's own multi-file update-file write can
+// never trigger a reload, regardless of how the OS batches/delays inotify events.
+// (The previous timing-window approach broke on large designs: Linux recursive
+// fs.watch delivers events in bursts that can outlast any fixed settle window,
+// leaking a false "external edit" and re-loading the page in a loop.)
 
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 
 // ── Tunables ──────────────────────────────────────────────────────────────────
 
 /** Debounce interval (ms): coalesce rapid file writes before emitting. */
 const DEBOUNCE_MS = 250;
 
-/** Settle period (ms): once a self-write starts, suppression stays active and is
- *  EXTENDED by every fs event it causes; it clears only after this many ms of quiet.
- *  This covers writes of ANY duration (a large design rewrites many page files over
- *  several seconds), so the SPA's own save never reloads.  A genuine external edit
- *  (after the self-write has settled) still reloads. */
-const SELF_WRITE_SETTLE_MS = 1500;
-
 /** SSE keepalive comment interval (ms).  Keeps the connection alive through
  *  proxies and prevents the browser from timing out. */
 const KEEPALIVE_MS = 20_000;
 
-// ── Shared self-write state (module-level singleton) ────────────────────────
-// noteSelfWrite() starts a self-write; the watcher's isSelfWriteSuppressed()
-// reads (and extends) it so a multi-file write of any duration stays suppressed.
-let _selfWriting = false;
-let _settleTimer = null;
+// ── Content-signature self-write suppression (module-level singleton) ─────────
+// _baselineSig is the content hash the runtime "knows about": set at watcher
+// start, refreshed by noteSelfWrite() after every SPA write, and advanced when a
+// genuine external change is broadcast.  The watcher reloads iff current != baseline.
+let _watchedDir = null;
+let _baselineSig = null;
 
-function _armSettle() {
-  if (_settleTimer) clearTimeout(_settleTimer);
-  _settleTimer = setTimeout(() => { _selfWriting = false; _settleTimer = null; }, SELF_WRITE_SETTLE_MS);
+/**
+ * Content hash of every .edn file under `dir` (path + bytes, sorted for
+ * determinism).  Cheap enough to recompute on each debounced change event.
+ */
+function computeSig(dir) {
+  if (!dir) return null;
+  const files = [];
+  (function walk(d) {
+    let ents;
+    try { ents = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+    for (const e of ents) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (e.name.endsWith(".edn")) files.push(p);
+    }
+  })(dir);
+  files.sort();
+  const h = crypto.createHash("sha1");
+  for (const f of files) {
+    h.update(f);
+    try { h.update(fs.readFileSync(f)); } catch { /* vanished mid-read — skip */ }
+  }
+  return h.digest("hex");
 }
 
 /**
- * Note that a write is being performed by the SPA (via update-file).
- * Suppression stays active (and is extended by each resulting fs event) until
- * the file activity goes quiet for SELF_WRITE_SETTLE_MS.
+ * Adopt the current on-disk content as the runtime's baseline.  Call this from
+ * the SPA write path (rpc.mjs persistChanges) immediately AFTER writeDesign, so
+ * the fs events that write generates resolve to the same signature → no reload.
  */
 export function noteSelfWrite() {
-  _selfWriting = true;
-  _armSettle();
-}
-
-/**
- * True while a self-write is in progress.  When true, EXTENDS the settle window
- * (each suppressed fs event pushes the clear-timer back), so even a slow,
- * many-file write never leaks a reload event.
- */
-function isSelfWriteSuppressed() {
-  if (_selfWriting) { _armSettle(); return true; }
-  return false;
+  if (_watchedDir) _baselineSig = computeSig(_watchedDir);
 }
 
 // ── Client set type ──────────────────────────────────────────────────────────
@@ -73,6 +81,10 @@ export function createLiveWatcher(designDir) {
   if (!designDir) {
     return { clients, close() {} };
   }
+
+  // Establish the content baseline for this design dir.
+  _watchedDir = designDir;
+  _baselineSig = computeSig(designDir);
 
   let debounceTimer = null;
   let watcher = null;
@@ -98,17 +110,19 @@ export function createLiveWatcher(designDir) {
 
   function onFileChange() {
     if (closed) return;
-    if (isSelfWriteSuppressed()) {
-      // SPA's own write — do not relay.
-      return;
-    }
     // Debounce: collapse rapid multi-file writes (manifest + several pages)
-    // into a single reload event.
+    // into a single signature check.
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
       debounceTimer = null;
       if (closed) return;
-      if (isSelfWriteSuppressed()) return; // re-check after debounce delay
+      // Content-based suppression: only react if the .edn content actually
+      // differs from what the runtime last wrote/observed.  The SPA's own
+      // writes leave the content == baseline (refreshed by noteSelfWrite),
+      // so they never reload — no matter how the OS batches inotify events.
+      const sig = computeSig(_watchedDir);
+      if (sig === _baselineSig) return;   // our write / no-op change
+      _baselineSig = sig;                 // adopt external state (don't re-fire)
       _rev++;
       broadcast(_rev);
     }, DEBOUNCE_MS);

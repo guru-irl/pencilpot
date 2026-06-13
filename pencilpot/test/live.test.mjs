@@ -38,23 +38,20 @@ test("createLiveWatcher returns { close, clients }", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Test 2: noteSelfWrite stamps the shared self-write clock
+// Test 2: noteSelfWrite executes (adopts the current content as baseline)
 // ---------------------------------------------------------------------------
-test("noteSelfWrite updates the internal self-write timestamp", () => {
-  const before = Date.now();
+test("noteSelfWrite runs without error", () => {
+  // Suppression is content-based: noteSelfWrite() snapshots the on-disk .edn
+  // content as the runtime's baseline.  Behaviour is verified in Test 3.
   noteSelfWrite();
-  const after = Date.now();
-  // Re-import the same module reference to check via createLiveWatcher
-  // (the function's internal state is shared across calls in the same module).
-  // We verify indirectly: a file-change fired immediately after noteSelfWrite
-  // should be suppressed (not relayed to clients) — see Test 3.
   assert.ok(true, "noteSelfWrite executed without error");
 });
 
 // ---------------------------------------------------------------------------
-// Test 3: file change after self-write is suppressed (no reload event)
+// Test 3: a self-write (write THEN noteSelfWrite) is suppressed — no matter how
+// many files change or how the OS batches/delays the fs events.
 // ---------------------------------------------------------------------------
-test("external file change after noteSelfWrite is suppressed within the window", async () => {
+test("self-write (write then noteSelfWrite) is suppressed", async () => {
   const dir = makeTmpDesignDir();
   const received = [];
   const watcher = createLiveWatcher(dir);
@@ -63,20 +60,38 @@ test("external file change after noteSelfWrite is suppressed within the window",
   const mockClient = { write: (data) => received.push(data), req: null, res: null };
   watcher.clients.add(mockClient);
 
-  // Mark a self-write RIGHT NOW.
-  noteSelfWrite();
-
-  // Touch the manifest within the suppression window (no delay).
+  // SPA write path: write many files (like a large design save) and THEN adopt
+  // the result as the baseline — exactly what rpc.mjs persistChanges does.
+  for (let i = 0; i < 20; i++) {
+    fs.writeFileSync(path.join(dir, "pages", `p${i}.edn`), `:p ${i}`);
+  }
   fs.writeFileSync(path.join(dir, "manifest.edn"), ":revn 1");
+  noteSelfWrite();                       // baseline now == just-written content
 
-  // Wait a bit longer than the watcher debounce (250 ms) but still inside
-  // the suppression window (1500 ms) to let any debounce fire.
-  await new Promise((r) => setTimeout(r, 500));
+  // Wait well past the debounce so any pending check fires.
+  await new Promise((r) => setTimeout(r, 600));
 
   watcher.clients.delete(mockClient);
   watcher.close();
 
   assert.equal(received.length, 0, "self-write change must NOT produce a reload event");
+});
+
+// ---------------------------------------------------------------------------
+// Test 3b: a no-op rewrite (identical content) does not fire a reload.
+// ---------------------------------------------------------------------------
+test("rewriting identical content does not fire a reload", async () => {
+  const dir = makeTmpDesignDir();
+  const received = [];
+  const watcher = createLiveWatcher(dir);
+  watcher.clients.add({ write: (data) => received.push(data) });
+
+  // Rewrite the manifest with byte-identical content (baseline == current).
+  fs.writeFileSync(path.join(dir, "manifest.edn"), ":revn 0");
+  await new Promise((r) => setTimeout(r, 600));
+
+  watcher.close();
+  assert.equal(received.length, 0, "identical-content rewrite must NOT reload");
 });
 
 // ---------------------------------------------------------------------------

@@ -39,15 +39,16 @@ function transitGet(transitStr, keyword) {
  * Hydrate -> applyFn(session) -> bump revn -> serialize -> write.
  * Returns { revn } so callers can embed it in the response.
  *
- * Calls noteSelfWrite() immediately before the disk write so the live-update
- * watcher suppresses the resulting fs event (no reload loop for SPA edits).
+ * Calls noteSelfWrite() immediately AFTER the disk write so the live-update
+ * watcher adopts the just-written content as its baseline — the fs events this
+ * write generates then resolve to an unchanged signature and never reload.
  */
 function persistChanges(dir, applyFn) {
   const s = sessionFor(dir);
   applyFn(s);
   const revn = s.bumpRevn();
-  noteSelfWrite();                             // ← suppress the watcher
   writeDesign(dir, JSON.parse(s.serializeStore()));
+  noteSelfWrite();                             // ← adopt new content as baseline
   return { revn };
 }
 

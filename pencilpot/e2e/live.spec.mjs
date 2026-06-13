@@ -1,7 +1,8 @@
 // e2e tests for the pencilpot live-update feature.
 //
-// Test A: External edit → page auto-reloads and new shape is present.
-// Test B: SPA self-write (update-file POST) → no reload loop.
+// Test A: External edit → non-destructive "external changes" banner appears
+//         (NO auto-reload); clicking Refresh reloads and shows the new shape.
+// Test B: SPA self-write (update-file POST) → no banner, no reload loop.
 //
 // Assumes the runtime server is already running (started by run-tests.mjs)
 // with the seeded project at PENCILPOT_PROJECT.
@@ -50,9 +51,10 @@ function countShapesOnDisk() {
 }
 
 // ---------------------------------------------------------------------------
-// Test A: external edit → browser reloads and shows new shape
+// Test A: external edit → non-destructive banner (no auto-reload); clicking
+// Refresh reloads and shows the new shape.
 // ---------------------------------------------------------------------------
-test("live-update: external disk edit triggers auto-reload", async ({ page }) => {
+test("live-update: external disk edit shows a click-to-refresh banner", async ({ page }) => {
   // Skip gracefully if the design directory doesn't exist (e.g., seed failed).
   if (!fs.existsSync(DESIGN)) {
     test.skip(true, `design dir not found: ${DESIGN}`);
@@ -95,19 +97,26 @@ test("live-update: external disk edit triggers auto-reload", async ({ page }) =>
   session.bumpRevn();
   const newParts = JSON.parse(session.serializeStore());
 
-  // Arm a page-load waiter BEFORE writing to disk.
-  const reloadWaiter = page.waitForEvent("load", { timeout: 15000 });
+  // Track reloads: the external edit must NOT auto-reload (non-destructive).
+  let autoReloads = 0;
+  page.on("load", () => { autoReloads++; });
 
   // Write the modified design to disk (external edit — no noteSelfWrite call).
   writeDesign(DESIGN, newParts);
 
-  // Wait for the browser to reload.
+  // The banner must appear (server detected the content change), but the page
+  // must NOT reload on its own.
+  const banner = page.locator("#pencilpot-live-banner");
+  await banner.waitFor({ state: "visible", timeout: 15000 });
+  expect(autoReloads, "external edit must NOT auto-reload the page").toBe(0);
+
+  // Clicking Refresh performs the reload the user opted into.
+  const reloadWaiter = page.waitForEvent("load", { timeout: 15000 });
+  await banner.getByRole("button", { name: "Refresh" }).click();
   await reloadWaiter;
 
-  // After reload, the canvas must still render.
+  // After the user-initiated reload, the canvas renders and the shape is present.
   await expectCanvasLoaded(page, expect);
-
-  // Count shapes again — should be higher.
   const shapesAfter = countShapesOnDisk();
   expect(shapesAfter).toBeGreaterThan(shapesBefore);
 }, { timeout: 30000 });
