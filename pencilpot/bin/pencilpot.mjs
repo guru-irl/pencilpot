@@ -320,6 +320,9 @@ Commands:
          [--name <design>]               Design name (default: file basename)
   designs <path.pencil|dir>              List designs in the project (marks the default)
   set-default <path.pencil|dir> <name>   Set the default design
+  add-font <fontfile> [--project <dir>]  Add a custom font file to the project
+           [--family <name>] [--weight 400] [--style normal] [--id <fontId>]
+  fonts <path.pencil|dir>               List added fonts + report missing families
   install-desktop                         Install as a desktop app
   uninstall-desktop                       Remove the desktop app entry
   --help, -h                              Show this help
@@ -333,6 +336,8 @@ Examples:
   pencilpot import Wireframes.penpot /tmp/new-project
   pencilpot designs my-design/
   pencilpot set-default my-design/ wireframes
+  pencilpot add-font MyFont.ttf --project my-design/ --family "My Font" --weight 400
+  pencilpot fonts my-design/
 `.trim());
 }
 
@@ -502,6 +507,119 @@ async function cmdSetDefault(positional, flags) {
 }
 
 // ---------------------------------------------------------------------------
+// add-font command — add a custom font file to a project
+// ---------------------------------------------------------------------------
+async function cmdAddFont(positional, flags) {
+  const fontFile = positional[0];
+  if (!fontFile) {
+    console.error("Usage: pencilpot add-font <fontfile> [--project <dir>] [--family <name>] [--weight 400] [--style normal] [--id <fontId>]");
+    process.exit(1);
+  }
+
+  const absFontFile = path.resolve(fontFile);
+  if (!fs.existsSync(absFontFile)) {
+    console.error(`Font file not found: ${absFontFile}`);
+    process.exit(1);
+  }
+
+  const { resolveProject } = await import("../store/project.mjs");
+  const { addFont } = await import("../store/fonts.mjs");
+
+  // Resolve project: --project flag or walk up from cwd
+  let proj;
+  const projectArg = flags["project"] ? path.resolve(flags["project"]) : process.cwd();
+  try {
+    proj = resolveProject(projectArg);
+  } catch (e) {
+    console.error(`Error: no project found at ${projectArg}. Run 'pencilpot new' first or pass --project <dir>.`);
+    process.exit(1);
+  }
+
+  const family  = flags["family"]  ?? undefined;  // let addFont derive from filename if omitted
+  const weight  = flags["weight"]  ? Number(flags["weight"])  : 400;
+  const style   = flags["style"]   ?? "normal";
+  const fontId  = flags["id"]      ?? undefined;
+
+  if (!family) {
+    // Require --family explicitly (prevents silent mis-derivation)
+    const derived = path.basename(absFontFile, path.extname(absFontFile)).replace(/[-_]+/g, " ");
+    console.log(`  note: --family not set, deriving from filename: "${derived}"`);
+  }
+
+  const variant = addFont(proj.root, { file: absFontFile, family, weight, style, fontId });
+
+  console.log(`added font:`);
+  console.log(`  family:  ${variant.family}`);
+  console.log(`  weight:  ${variant.weight}`);
+  console.log(`  style:   ${variant.style}`);
+  console.log(`  format:  ${variant.format}`);
+  console.log(`  id:      ${variant.id}`);
+  console.log(`  file:    fonts/${variant.file}`);
+}
+
+// ---------------------------------------------------------------------------
+// fonts command — list added fonts and missing fonts in designs
+// ---------------------------------------------------------------------------
+async function cmdFonts(positional, flags) {
+  const arg = positional[0];
+  if (!arg) {
+    console.error("Usage: pencilpot fonts <path.pencil|dir>");
+    process.exit(1);
+  }
+
+  const { resolveProject } = await import("../store/project.mjs");
+  const { readFonts } = await import("../store/fonts.mjs");
+
+  let proj;
+  try {
+    proj = resolveProject(path.resolve(arg));
+  } catch (e) {
+    console.error(`Error resolving project: ${e.message}`);
+    process.exit(1);
+  }
+
+  const variants = readFonts(proj.root);
+
+  console.log(`Project: ${proj.name}  (${proj.root})`);
+
+  if (variants.length === 0) {
+    console.log("  (no custom fonts added — use 'pencilpot add-font <file>' to add one)");
+  } else {
+    console.log("Custom fonts:");
+    for (const v of variants) {
+      console.log(`  ${v.family} ${v.weight} ${v.style}  [${v.format}]  id=${v.id}`);
+    }
+  }
+
+  // Scan design EDN files for font-family references and report missing ones.
+  // Only heuristic scan — we look for :font-family "<name>" in the EDN text.
+  const usedFamilies = new Set();
+  for (const design of proj.designs) {
+    const pagesDir = path.join(design.dir, "pages");
+    if (!fs.existsSync(pagesDir)) continue;
+    for (const f of fs.readdirSync(pagesDir)) {
+      if (!f.endsWith(".edn")) continue;
+      const edn = fs.readFileSync(path.join(pagesDir, f), "utf8");
+      // Extract :font-family "..." values
+      const re = /:font-family\s+"([^"]+)"/g;
+      let m;
+      while ((m = re.exec(edn)) !== null) usedFamilies.add(m[1]);
+    }
+  }
+
+  const addedFamilies = new Set(variants.map((v) => v.family));
+  // Built-in font families (bundled with Penpot) — not "missing"
+  const builtins = new Set(["Source Sans Pro", "sourcesanspro"]);
+
+  const missing = [...usedFamilies].filter((f) => !addedFamilies.has(f) && !builtins.has(f));
+  if (missing.length > 0) {
+    console.log("Missing fonts (referenced in designs but not yet added):");
+    for (const f of missing) console.log(`  missing: ${f}`);
+    console.log("  → use 'pencilpot add-font <file> --family \"<name>\"' to add them");
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 const { cmd, flags, positional } = parseArgs(process.argv);
@@ -526,6 +644,12 @@ switch (cmd) {
     break;
   case "set-default":
     await cmdSetDefault(positional, flags);
+    break;
+  case "add-font":
+    await cmdAddFont(positional, flags);
+    break;
+  case "fonts":
+    await cmdFonts(positional, flags);
     break;
   case "install-desktop":
     cmdInstallDesktop();

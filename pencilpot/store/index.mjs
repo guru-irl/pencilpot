@@ -8,3 +8,4 @@ export {
   resolveProjectRoot,
   listDesigns,
 } from "./project.mjs";
+export { readFonts, addFont } from "./fonts.mjs";

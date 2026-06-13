@@ -5,6 +5,8 @@ import { attachWsStub } from "./proxy.mjs";
 import { handleRpc } from "./rpc.mjs";
 import { serveStatic } from "./static.mjs";
 import { resolveProject } from "../store/project.mjs";
+import { readFonts } from "../store/fonts.mjs";
+import { handleGfontsCSS, handleGfontsFont } from "./gfonts.mjs";
 
 const PORT = Number(process.env.PENCILPOT_PORT ?? 7777);
 
@@ -66,8 +68,57 @@ const TEAM_ID = "0398e5fc-95c9-80d6-8008-29071f0fdaed";
 
 const fileId = readFileId(designDir);
 
+// Map font variant id → absolute path of the font file in the project.
+function resolveFontAsset(fileId) {
+  if (!CONFIG.project) return null;
+  // CONFIG.project may be a .pencil path or a project root dir.
+  const projectRoot = CONFIG.project.endsWith(".pencil")
+    ? path.dirname(CONFIG.project)
+    : CONFIG.project;
+  const variants = readFonts(projectRoot);
+  const v = variants.find((v) => v.id === fileId);
+  if (!v) return null;
+  return { filePath: path.join(projectRoot, "fonts", v.file), format: v.format };
+}
+
+// Content-type by font format.
+const FONT_CONTENT_TYPES = {
+  woff2: "font/woff2",
+  woff1: "font/woff",
+  ttf:   "font/ttf",
+  otf:   "font/otf",
+};
+
 const server = http.createServer(async (req, res) => {
   try {
+    // Font asset route: GET /assets/by-id/<file-id>
+    // Must be checked BEFORE serveStatic (which would return 404 for this path).
+    if (req.method === "GET" && req.url.startsWith("/assets/by-id/")) {
+      const fileId = decodeURIComponent(req.url.split("?")[0].replace("/assets/by-id/", ""));
+      const asset = resolveFontAsset(fileId);
+      if (asset && fs.existsSync(asset.filePath)) {
+        const ct = FONT_CONTENT_TYPES[asset.format] ?? "application/octet-stream";
+        res.writeHead(200, {
+          "content-type": ct,
+          "cache-control": "public, max-age=31536000, immutable",
+        });
+        fs.createReadStream(asset.filePath).pipe(res);
+        return;
+      }
+      // Unknown file-id — fall through to 404
+      res.writeHead(404);
+      res.end("font not found");
+      return;
+    }
+
+    // Google Fonts proxy routes — must be before static fallback.
+    if (req.method === "GET" && req.url.startsWith("/internal/gfonts/css")) {
+      return await handleGfontsCSS(req, res);
+    }
+    if (req.method === "GET" && req.url.startsWith("/internal/gfonts/font/")) {
+      return await handleGfontsFont(req, res);
+    }
+
     if (req.url.startsWith("/api/")) return await handleRpc(req, res, CONFIG);
     return serveStatic(req, res, { fileId, teamId: TEAM_ID });
   } catch (err) {

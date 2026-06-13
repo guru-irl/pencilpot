@@ -3,6 +3,7 @@
 import path from "node:path";
 import { createSession } from "../../headless-core/target/headless/penpot.js";
 import { readDesign, writeDesign } from "../store/index.mjs";
+import { readFonts } from "../store/fonts.mjs";
 import { resolveProjectRoot, resolveProject } from "../store/project.mjs";
 import { readBody } from "./proxy.mjs";
 import { stub, isStub, buildUpdateFileResponse } from "./stubs.mjs";
@@ -153,6 +154,44 @@ function encodeTransitLibraryList(libs) {
 }
 
 // ---------------------------------------------------------------------------
+// Font variants: transit encoding for get-font-variants
+// ---------------------------------------------------------------------------
+
+/**
+ * Encode a list of project font variants (from readFonts) as transit+json.
+ *
+ * Penpot frontend `prepare-font-variant` reads from each item:
+ *   :font-style, :font-weight, :font-family,
+ *   :woff1-file-id, :woff2-file-id, :ttf-file-id, :otf-file-id
+ *   (plus :id and :font-id for the font registry key)
+ *
+ * We map our variant's format field to the appropriate *-file-id key, setting
+ * the others to null so the frontend skips them.  The variant id is used as
+ * the file-id so the asset route /assets/by-id/<id> resolves it directly.
+ */
+function encodeTransitFontVariants(variants) {
+  const arr = variants.map(({ id, fontId, family, weight, style, format }) => {
+    const woff2 = format === "woff2" ? id : null;
+    const woff1 = format === "woff1" ? id : null;
+    const ttf   = format === "ttf"   ? id : null;
+    const otf   = format === "otf"   ? id : null;
+    return [
+      "^ ",
+      "~:id",           id,
+      "~:font-id",      fontId ?? id,
+      "~:font-family",  family,
+      "~:font-weight",  weight,
+      "~:font-style",   style,
+      "~:woff2-file-id", woff2,
+      "~:woff1-file-id", woff1,
+      "~:ttf-file-id",   ttf,
+      "~:otf-file-id",   otf,
+    ];
+  });
+  return JSON.stringify(arr);
+}
+
+// ---------------------------------------------------------------------------
 // HTTP router — called by server.mjs for every /api/* request
 // ---------------------------------------------------------------------------
 
@@ -208,6 +247,20 @@ export async function handleRpc(req, res, cfg) {
       "x-pencilpot-source": "disk",
     });
     res.end(encodeTransitLibraryList(libs));
+    return;
+  }
+
+  if (command === "get-font-variants") {
+    // Serve custom font variants from the project's fonts/ directory.
+    // team-id in the request is ignored (pencilpot has no multi-team concept).
+    // Empty project → valid empty list (safe fallback; does not break SPA boot).
+    const projectRoot = cfg.project ?? (cfg.design ? resolveProjectRoot(cfg.design) : null);
+    const variants = projectRoot ? readFonts(projectRoot) : [];
+    res.writeHead(200, {
+      "content-type": "application/transit+json",
+      "x-pencilpot-source": "disk",
+    });
+    res.end(encodeTransitFontVariants(variants));
     return;
   }
 

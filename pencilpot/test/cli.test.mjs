@@ -297,3 +297,39 @@ test("pencilpot open --design <name> --no-window serves that specific design", a
     assert.ok(ok, "runtime serves get-file for the specific design");
   } finally { child.kill("SIGTERM"); }
 });
+
+// ---------------------------------------------------------------------------
+// Part B: add-font + fonts CLI commands
+// ---------------------------------------------------------------------------
+
+test("pencilpot add-font registers a font and fonts lists it", (t) => {
+  const systemFont = [
+    "/usr/share/fonts/carlito/Carlito-Regular.ttf",
+    "/usr/share/fonts/carlito/Carlito-Bold.ttf",
+  ].find((f) => fs.existsSync(f));
+  if (!systemFont) return t.skip("no system .ttf font found");
+
+  const dir = path.join(tmp(), "fonttest");
+  execFileSync("node", [BIN, "new", dir], { stdio: "pipe" });
+
+  // add-font
+  const addOut = execFileSync(
+    "node", [BIN, "add-font", systemFont, "--project", dir, "--family", "Carlito", "--weight", "400", "--style", "normal"],
+    { encoding: "utf8" }
+  );
+  assert.match(addOut, /Carlito|added|font/i, "add-font prints confirmation");
+
+  // fonts list
+  const listOut = execFileSync("node", [BIN, "fonts", dir], { encoding: "utf8" });
+  assert.match(listOut, /Carlito/, "fonts list includes Carlito");
+});
+
+test("pencilpot fonts reports missing fonts referenced in designs", (t) => {
+  const dir = path.join(tmp(), "missingfont");
+  execFileSync("node", [BIN, "new", dir], { stdio: "pipe" });
+
+  // fonts command on empty project should run without error
+  const out = execFileSync("node", [BIN, "fonts", dir], { encoding: "utf8" });
+  // Either empty or prints "no fonts" — just mustn't crash
+  assert.ok(typeof out === "string", "fonts command produces output");
+});

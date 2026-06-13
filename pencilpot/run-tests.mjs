@@ -10,6 +10,7 @@
 //                  pencilpot/test/rpc.test.mjs
 //                  pencilpot/test/library.test.mjs
 //                  pencilpot/test/cli.test.mjs
+//                  pencilpot/test/fonts.test.mjs
 //   desktop      — smoke: bash pencilpot/scripts/verify-desktop.sh
 //                  Runs only when `pencilpot` is on PATH AND
 //                  ~/.local/share/applications/pencilpot.desktop exists.
@@ -284,6 +285,7 @@ async function main() {
       path.join(HERE, "test/rpc.test.mjs"),
       path.join(HERE, "test/library.test.mjs"),
       path.join(HERE, "test/cli.test.mjs"),
+      path.join(HERE, "test/fonts.test.mjs"),
     ];
     console.log(col("cyan", col("bold", "\n▶ tier: integration")));
     const stats = runNodeTier(files);
