@@ -36,6 +36,14 @@
    :font-weight
    :font-style])
 
+;; Variable-font axis overrides: a map of OpenType axis tag (string, e.g.
+;; "wght" "wdth" "slnt" "opsz" "GRAD" "ROND") -> design-coordinate (number).
+;; Absent/nil means "use the selected static variant as-is" (no variation).
+;; Kept as its own group so code that assumes `text-font-attrs` is exactly the
+;; six classic font fields is unaffected.
+(def text-variation-attrs
+  [:font-variation-settings])
+
 (def text-align-attrs
   [:text-align])
 
@@ -73,6 +81,7 @@
   (d/concat-vec
    text-typography-attrs
    text-font-attrs
+   text-variation-attrs
    text-spacing-attrs
    text-decoration-attrs
    text-transform-attrs
@@ -132,6 +141,7 @@
    :font-size
    :font-weight
    :font-style
+   :font-variation-settings
    :line-height
    :letter-spacing
    :text-transform])

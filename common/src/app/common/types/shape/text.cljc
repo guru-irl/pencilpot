@@ -15,6 +15,11 @@
 
 (def node-types #{"root" "paragraph-set" "paragraph"})
 
+;; Variable-font axis overrides: OpenType axis tag (e.g. "wght" "wdth" "slnt"
+;; "opsz" "GRAD" "ROND") -> design coordinate (number).
+(def schema:font-variation-settings
+  [:maybe [:map-of ::sm/text ::sm/safe-number]])
+
 (def schema:content
   [:map
    [:type [:= "root"]]
@@ -37,6 +42,7 @@
           [:font-size {:optional true} ::sm/text]
           [:font-style {:optional true} ::sm/text]
           [:font-weight {:optional true} ::sm/text]
+          [:font-variation-settings {:optional true} schema:font-variation-settings]
           [:direction {:optional true} ::sm/text]
           [:text-decoration {:optional true} ::sm/text]
           [:text-transform {:optional true} ::sm/text]
@@ -53,6 +59,7 @@
              [:font-size {:optional true} ::sm/text]
              [:font-style {:optional true} ::sm/text]
              [:font-weight {:optional true} ::sm/text]
+             [:font-variation-settings {:optional true} schema:font-variation-settings]
              [:direction {:optional true} ::sm/text]
              [:text-decoration {:optional true} ::sm/text]
              [:text-transform {:optional true} ::sm/text]
