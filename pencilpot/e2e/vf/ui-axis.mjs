@@ -141,12 +141,17 @@ export async function run({ projectRoot, fileId, outDir, port }) {
     await setAxis(page, "Width", 151);
     await shotCanvas(page, p("04-after-width.png"));
 
+    // --- SLANT: the unambiguous test — slnt -10 must make the glyphs lean. ---
+    await setAxis(page, "Slant", -10);
+    await shotCanvas(page, p("05-after-slant.png"));
+
     await browser.close();
 
     result.shots = {
       gradDiff: rmse(p("01-before.png"), p("02-after-grad.png")),
       opszDiff: rmse(p("02-after-grad.png"), p("03-after-opsz.png")),
       widthDiff: rmse(p("03-after-opsz.png"), p("04-after-width.png")),
+      slantDiff: rmse(p("04-after-width.png"), p("05-after-slant.png")),
     };
     return result;
   } finally {

@@ -1,17 +1,39 @@
 import path from "node:path";
+import fs from "node:fs";
+import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+const REPO = path.resolve(HERE, "../..");
 
 export function distDir() {
   return process.env.PENCILPOT_FRONTEND || path.resolve(HERE, "../../frontend/resources/public");
 }
 
+/**
+ * Build identity stamp: the git commit the runtime is on + the mtime of the
+ * served workspace bundle. Printed to the browser console so it's unambiguous
+ * which build a window is actually running (stale-bundle diagnosis).
+ */
+function buildStamp() {
+  let commit = "unknown";
+  try { commit = execSync("git rev-parse --short HEAD", { cwd: REPO }).toString().trim(); } catch { /* not a git repo */ }
+  let bundle = "?";
+  try {
+    const st = fs.statSync(path.join(distDir(), "js", "main-workspace.js"));
+    bundle = new Date(st.mtimeMs).toISOString().replace("T", " ").slice(0, 19);
+  } catch { /* not built */ }
+  return { commit, bundle, dist: distDir() };
+}
+
 // Runtime-injected config.js body (replaces the env-templated one in stock Penpot).
 export function configJs({ publicUri = "", fileId = null, teamId = null } = {}) {
+  const stamp = buildStamp();
   return `globalThis.penpotPublicURI=${publicUri ? JSON.stringify(publicUri) : "location.origin"};`
     + `globalThis.penpotFlags="";`
     + `globalThis.pencilpotFile=${JSON.stringify({ fileId, teamId })};`
+    + `globalThis.pencilpotBuild=${JSON.stringify(stamp)};`
+    + `console.log("%c pencilpot %c build ${stamp.commit} · bundle ${stamp.bundle} ","background:#7b61ff;color:#fff;border-radius:3px","color:#7b61ff");`
     + liveUpdateScript();
 }
 
