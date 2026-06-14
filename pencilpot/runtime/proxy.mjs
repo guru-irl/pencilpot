@@ -36,8 +36,28 @@ export function readBody(req) {
 }
 
 // Accept /ws/notifications and do nothing (no presence/collab in local mode).
+//
+// Uses a `noServer` WS server with explicit path-routed upgrade handoff so it
+// coexists with the other WS endpoints attached to the same HTTP server (e.g.
+// the integrated terminal at /pencilpot/terminal).  A `{ server, path }` server
+// would install an `upgrade` listener that rejects (HTTP 400) any upgrade whose
+// path doesn't match — clobbering sibling endpoints.
 export function attachWsStub(server) {
-  const wss = new WebSocketServer({ server, path: "/ws/notifications" });
+  const wss = new WebSocketServer({ noServer: true });
+
+  server.on("upgrade", (req, socket, head) => {
+    let pathname;
+    try {
+      pathname = new URL(req.url, "http://localhost").pathname;
+    } catch {
+      return;
+    }
+    if (pathname !== "/ws/notifications") return; // not ours — ignore
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      wss.emit("connection", ws, req);
+    });
+  });
+
   wss.on("connection", (sock) => {
     sock.on("message", () => {});
     sock.on("error", () => {});

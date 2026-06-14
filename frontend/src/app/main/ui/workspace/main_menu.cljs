@@ -361,6 +361,20 @@
                         :class (stl/css :base-menu :sub-menu :pos-3)
                         :on-close on-close}
 
+     ;; pencilpot: integrated terminal bottom dock toggle.
+     [:> dropdown-menu-item* {:class (stl/css :base-menu-item :submenu-item)
+                              :on-click    toggle-flag
+                              :on-key-down (fn [event]
+                                             (when (kbd/enter? event)
+                                               (toggle-flag event)))
+                              :data-testid "terminal"
+                              :id          "file-menu-terminal"}
+      [:span {:class (stl/css :item-name)}
+       (if (contains? layout :terminal)
+         "Hide terminal"
+         "Show terminal")]
+      [:> shortcuts* {:id :toggle-terminal}]]
+
      [:> dropdown-menu-item* {:class (stl/css :base-menu-item :submenu-item)
                               :on-click    toggle-flag
                               :on-key-down (fn [event]

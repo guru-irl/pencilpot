@@ -406,6 +406,12 @@
                           :subsections [:main-menu]
                           :fn #(st/emit! (toggle-layout-flag :rulers))}
 
+   ;; pencilpot: integrated terminal bottom dock (VS Code-style).
+   :toggle-terminal      {:tooltip (ds/meta "`")
+                          :command (ds/c-mod "`")
+                          :subsections [:main-menu]
+                          :fn #(st/emit! (toggle-layout-flag :terminal))}
+
    :select-all           {:tooltip (ds/meta "A")
                           :command (ds/c-mod "a")
                           :subsections [:main-menu]

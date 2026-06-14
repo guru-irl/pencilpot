@@ -52,6 +52,8 @@
   "devDependencies": {
     "@penpot/draft-js": "workspace:./packages/draft-js",
     "@penpot/mousetrap": "workspace:./packages/mousetrap",
+    "@xterm/addon-fit": "0.11.0",
+    "@xterm/xterm": "6.0.0",
     "@penpot/plugins-runtime": "link:../plugins/libs/plugins-runtime",
     "@penpot/svgo": "penpot/svgo#v3.2",
     "@penpot/text-editor": "workspace:./text-editor",

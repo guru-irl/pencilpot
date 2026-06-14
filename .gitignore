@@ -106,3 +106,4 @@ pencilpot/spike/store/
 pencilpot/spike/node_modules/
 pencilpot/**/node_modules/
 pencilpot/.scratch/
+pencilpot/test-results/

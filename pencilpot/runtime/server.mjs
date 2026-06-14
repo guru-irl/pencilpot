@@ -8,6 +8,7 @@ import { resolveProject } from "../store/project.mjs";
 import { readFonts } from "../store/fonts.mjs";
 import { handleGfontsCSS, handleGfontsFont } from "./gfonts.mjs";
 import { startLiveWatcher, handleLiveSse } from "./live.mjs";
+import { attachTerminal } from "./terminal.mjs";
 
 const PORT = Number(process.env.PENCILPOT_PORT ?? 7777);
 
@@ -136,4 +137,6 @@ const server = http.createServer(async (req, res) => {
   }
 });
 attachWsStub(server);
+// Integrated terminal: PTY bridged over WS at /pencilpot/terminal, CWD = project dir.
+attachTerminal(server, CONFIG);
 server.listen(PORT, () => console.log(`pencilpot runtime on http://localhost:${PORT}  project=${CONFIG.project} design=${CONFIG.design} fileId=${fileId}`));
