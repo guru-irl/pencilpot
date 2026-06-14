@@ -48,7 +48,12 @@ export function serveStatic(req, res, cfg = {}) {
     }
     const ext = path.extname(file).toLowerCase();
     const headers = { "content-type": TYPES[ext] || "application/octet-stream" };
-    if (urlPath === "/index.html") headers["cache-control"] = "no-store";
+    // pencilpot serves freshly-built assets on every run; the chunk filenames are
+    // stable (shared.js, main-workspace.js, …) and the ?version= query is constant,
+    // so heuristic browser caching would serve a STALE chunk alongside a fresh one
+    // — a cross-build "split brain" that surfaces as undefined keyword constants
+    // ($cljs$cst$…) and a forced reload loop. Never cache build outputs.
+    headers["cache-control"] = "no-store, must-revalidate";
     res.writeHead(200, headers);
     res.end(buf);
   });

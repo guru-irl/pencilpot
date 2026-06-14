@@ -482,6 +482,9 @@
   (let [variation-settings (let [vs (:font-variation-settings values)]
                              (when (map? vs) vs))
         font-weight        (:font-weight values)
+        ;; The weight (wght) axis is driven by the existing weight/variant
+        ;; dropdown above — don't duplicate it as a control here.
+        axes               (remove #(= "wght" (:tag %)) axes)
 
         handle-change
         (mf/use-fn
@@ -502,23 +505,25 @@
                           axes)]
              (on-change {:font-variation-settings updated}))))]
 
-    [:div {:class (stl/css :variation-options)}
-     [:span {:class (stl/css :variation-title)} "Variable axes"]
-     (for [{:keys [tag min max] :as axis} axes]
-       (let [value (axis-current-value axis variation-settings font-weight)]
-         [:div {:class (stl/css :variation-axis)
-                :key (dm/str "axis-" tag)
-                :title (axis-label axis)}
-          [:span {:class (stl/css :variation-axis-label)} (axis-label axis)]
-          [:> numeric-input*
-           {:min min
-            :max max
-            :step 1
-            :class (stl/css :variation-axis-input)
-            :aria-label (axis-label axis)
-            :value (str value)
-            :on-change #(handle-change tag %)
-            :on-blur on-blur}]]))]))
+    (when (seq axes)
+      [:div {:class (stl/css :variation-options)}
+       [:span {:class (stl/css :variation-title)} "Variable axes"]
+       [:div {:class (stl/css :variation-grid)}
+        (for [{:keys [tag min max] :as axis} axes]
+          (let [value (axis-current-value axis variation-settings font-weight)]
+            [:div {:class (stl/css :variation-axis)
+                   :key (dm/str "axis-" tag)
+                   :title (axis-label axis)}
+             [:span {:class (stl/css :variation-axis-label)} tag]
+             [:> numeric-input*
+              {:min min
+               :max max
+               :step 1
+               :class (stl/css :variation-axis-input)
+               :aria-label (axis-label axis)
+               :value (str value)
+               :on-change #(handle-change tag %)
+               :on-blur on-blur}]]))]])))
 
 (mf/defc text-options*
   [{:keys [ids editor values on-change on-blur show-recent]}]
@@ -541,11 +546,15 @@
       [:> spacing-options opts]
       [:> text-transform-options opts]]
      (when (seq axes)
+       ;; font-variation-options is ::mf/wrap-props false (reads raw JS props),
+       ;; so it MUST be given a #js object — exactly like the sibling components
+       ;; above (which receive the #js `opts`). Passing a ClojureScript map left
+       ;; `on-change`/`values` undefined and crashed on first axis commit.
        [:> font-variation-options
-        {:values values
-         :on-change on-change
-         :on-blur on-blur
-         :axes axes}])]))
+        #js {:values values
+             :on-change on-change
+             :on-blur on-blur
+             :axes axes}])]))
 
 (mf/defc typography-advanced-options
   {::mf/wrap [mf/memo]}

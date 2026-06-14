@@ -313,25 +313,30 @@
   color: var(--color-foreground-secondary);
 }
 
+.variation-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-xs);
+}
+
 .variation-axis {
   @extend %input-element;
   @include t.use-typography("body-small");
 
-  justify-content: space-between;
   gap: var(--sp-xs);
   padding-inline-start: var(--sp-s);
 }
 
 .variation-axis-label {
-  flex-grow: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  flex-shrink: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-foreground-secondary);
 }
 
 .variation-axis-input {
-  flex-shrink: 0;
-  inline-size: $sz-64;
+  flex-grow: 1;
+  min-inline-size: 0;
 }
 
 .font-size-select {
