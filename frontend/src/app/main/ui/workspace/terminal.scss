@@ -1,0 +1,101 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+//
+// Copyright (c) KALEIDOS INC Sucursal en España SL
+
+@use "refactor/common-refactor.scss" as deprecated;
+
+// pencilpot integrated terminal — bottom dock, full width across the workspace.
+.terminal-dock {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  min-height: 120px;
+  background-color: var(--color-background-primary, #18181a);
+  border-top: 1px solid var(--color-background-quaternary, #2e2e33);
+  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.35);
+}
+
+// Drag handle along the top edge to resize the dock vertically.
+.terminal-resizer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 6px;
+  cursor: ns-resize;
+  user-select: none;
+
+  &:hover,
+  &.is-dragging {
+    background-color: var(--color-accent-primary, #7b61ff);
+    opacity: 0.5;
+  }
+}
+
+.terminal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 28px;
+  padding: 0 deprecated.$s-8 0 deprecated.$s-12;
+  flex: none;
+  border-bottom: 1px solid var(--color-background-quaternary, #2e2e33);
+  user-select: none;
+}
+
+.terminal-title {
+  color: var(--color-foreground-secondary, #b3b3bb);
+  font-size: deprecated.$fs-11;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.terminal-actions {
+  display: flex;
+  align-items: center;
+  gap: deprecated.$s-4;
+}
+
+.terminal-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: deprecated.$br-4;
+  background: transparent;
+  color: var(--color-foreground-secondary, #b3b3bb);
+  font-size: deprecated.$fs-12;
+  cursor: pointer;
+
+  &:hover {
+    background-color: var(--color-background-tertiary, #2e2e33);
+    color: var(--color-foreground-primary, #e3e3e8);
+  }
+}
+
+.terminal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  padding: deprecated.$s-4 deprecated.$s-8;
+
+  // xterm fills its container.
+  :global(.xterm) {
+    height: 100%;
+  }
+  :global(.xterm-viewport) {
+    // Match the dock background so the scroll gutter blends in.
+    background-color: transparent !important;
+  }
+}
+

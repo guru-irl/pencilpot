@@ -31,6 +31,7 @@
    [app.main.ui.workspace.plugins]
    [app.main.ui.workspace.sidebar :refer [sidebar*]]
    [app.main.ui.workspace.sidebar.history :refer [history-toolbox*]]
+   [app.main.ui.workspace.terminal :refer [terminal-dock*]]
    [app.main.ui.workspace.tokens.export]
    [app.main.ui.workspace.tokens.export.modal]
    [app.main.ui.workspace.tokens.import]
@@ -283,7 +284,13 @@
                     (and wasm-renderer-enabled?
                          (not file-loaded?)
                          (not @first-frame-rendered?)))
-            [:> workspace-loader*])]]]]]]))
+            [:> workspace-loader*])
+
+          ;; pencilpot: integrated terminal bottom dock (toggle with Ctrl+`).
+          ;; Mounted only while the :terminal layout flag is set, so the PTY/WS
+          ;; session is created on open and torn down on close.
+          (when (:terminal layout)
+            [:> terminal-dock*])]]]]]]))
 
 (mf/defc workspace-page*
   {::mf/lazy-load true}

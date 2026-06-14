@@ -32,7 +32,9 @@
     :display-artboard-names
     :snap-ruler-guides
     :show-pixel-grid
-    :snap-pixel-grid})
+    :snap-pixel-grid
+    ;; pencilpot: integrated terminal bottom dock (Ctrl+`)
+    :terminal})
 
 (def presets
   {:assets
@@ -143,7 +145,8 @@
   {:hide-palettes :app.main.data.workspace/hide-palettes?
    :colorpalette :app.main.data.workspace/show-colorpalette?
    :textpalette :app.main.data.workspace/show-textpalette?
-   :rulers :app.main.data.workspace/show-rulers?})
+   :rulers :app.main.data.workspace/show-rulers?
+   :terminal :app.main.data.workspace/show-terminal?})
 
 (defn load-layout-flags
   "Given the current layout flags, and updates them with the data

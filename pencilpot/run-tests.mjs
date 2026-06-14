@@ -12,12 +12,14 @@
 //                  pencilpot/test/library.test.mjs
 //                  pencilpot/test/cli.test.mjs
 //                  pencilpot/test/fonts.test.mjs
+//                  pencilpot/test/terminal.test.mjs  (PTY <-> WS bridge)
 //   desktop      — smoke: bash pencilpot/scripts/verify-desktop.sh
 //                  Runs only when `pencilpot` is on PATH AND
 //                  ~/.local/share/applications/pencilpot.desktop exists.
 //                  LOUDLY skipped (not failed) when not installed.
 //   e2e          — Playwright + penpot-hl :9101. Seeds a project, starts the runtime.
 //                  pencilpot/e2e/boot.spec.mjs + edit.spec.mjs + library.spec.mjs
+//                  + terminal.spec.mjs (integrated terminal dock; headless-safe)
 //
 // Preflight:
 //   1. Ensure headless-core/target/headless/penpot.js exists; else build.
@@ -288,6 +290,7 @@ async function main() {
       path.join(HERE, "test/library.test.mjs"),
       path.join(HERE, "test/cli.test.mjs"),
       path.join(HERE, "test/fonts.test.mjs"),
+      path.join(HERE, "test/terminal.test.mjs"),
     ];
     console.log(col("cyan", col("bold", "\n▶ tier: integration")));
     const stats = runNodeTier(files);
