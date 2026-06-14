@@ -80,7 +80,25 @@
                  (cfh/text-shape? shape)
                  (not= :fixed (:grow-type shape)))
           (rx/of (dwm/apply-wasm-modifiers (resize-wasm-text-modifiers shape)))
-          (rx/empty))))))
+          (rx/empty))))
+
+    ptk/EffectEvent
+    (effect [_ state _]
+      ;; `resize-wasm-text-modifiers` already pushed the up-to-date content into
+      ;; WASM (via `set-shape-text-content`). When the edit changes the text
+      ;; metrics (font-weight, width axis, ...) the resulting non-identity resize
+      ;; modifier repaints the shape. But content-only changes that don't alter
+      ;; the box -- e.g. a non-metric variable-font axis (GRAD/ROND/opsz/slnt) --
+      ;; produce an identity resize that triggers no repaint, leaving the new
+      ;; glyphs unpainted. Request a render explicitly so those changes show. The
+      ;; request is RAF-debounced, so it is a no-op overhead when a modifier
+      ;; repaint already happens.
+      (let [objects (dsh/lookup-page-objects state)
+            shape   (get objects id)]
+        (when (and (some? shape)
+                   (cfh/text-shape? shape)
+                   (not= :fixed (:grow-type shape)))
+          (wasm.api/request-render "resize-wasm-text"))))))
 
 (defn resize-wasm-text-debounce-commit
   ([]
