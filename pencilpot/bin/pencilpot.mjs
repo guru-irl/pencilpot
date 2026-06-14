@@ -780,9 +780,10 @@ async function cmdAddVariableFont(positional, flags) {
 
   console.log(`added variable font:`);
   console.log(`  family:  ${variant.family}`);
-  console.log(`  id:      ${variant.id}`);
+  console.log(`  font-id: ${variant.fontId}`);
   console.log(`  format:  ${variant.format}`);
   console.log(`  file:    fonts/${variant.file}`);
+  console.log(`  weights: ${variant.variants.map((v) => v.weight).join(", ")} (${variant.variants.length} variants share one VF file)`);
   console.log(`  axes (${fvar.axes.length}):`);
   for (const a of fvar.axes) {
     console.log(`    ${a.tag.padEnd(4)}  ${a.min} .. ${a.default} .. ${a.max}   ${a.name}`);

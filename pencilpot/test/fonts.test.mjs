@@ -463,34 +463,48 @@ test("addVariableFont round-trips axes + instances via readFonts", async (t) => 
   const { readFvar } = await import("../store/fvar.mjs");
 
   const { axes, instances } = readFvar(fs.readFileSync(VF_FIXTURE));
-  const variant = addVariableFont(dir, {
+  const descriptor = addVariableFont(dir, {
     file: VF_FIXTURE,
     family: "Google Sans Flex",
     axes,
     instances,
   });
 
-  // Returned descriptor carries the variable shape
-  assert.equal(variant.variable, true, "variant.variable is true");
-  assert.equal(variant.id, "vf-google-sans-flex", "fontId defaults to vf-<slug>");
-  assert.equal(variant.fontId, variant.id, "fontId equals id");
-  assert.ok(variant.axes.length > 0, "axes present");
-  assert.ok(variant.instances.length > 0, "instances present");
+  // Returned descriptor carries the variable family shape: a full weight ramp
+  // (100–900) sharing one VF file, under a loadable custom-<slug> font-id.
+  assert.equal(descriptor.variable, true, "descriptor.variable is true");
+  assert.equal(descriptor.fontId, "custom-google-sans-flex", "fontId defaults to custom-<slug>");
+  assert.equal(descriptor.variants.length, 9, "9-weight ramp registered");
+  assert.deepEqual(
+    descriptor.variants.map((v) => v.weight),
+    [100, 200, 300, 400, 500, 600, 700, 800, 900],
+    "weights 100..900"
+  );
+  // Every variant shares the one VF file and the custom- font-id.
+  for (const v of descriptor.variants) {
+    assert.equal(v.fontId, "custom-google-sans-flex", "variant fontId is custom-<slug>");
+    assert.equal(v.file, descriptor.file, "all variants share one VF file");
+    assert.equal(v.id, `custom-google-sans-flex-w${v.weight}`, "variant id = <fontId>-w<weight>");
+    assert.equal(v.variable, true, "variant.variable true");
+    assert.ok(v.axes.length > 0, "axes present");
+    assert.ok(v.instances.length > 0, "instances present");
+  }
 
-  // Font file copied
-  assert.ok(fs.existsSync(path.join(dir, "fonts", variant.file)), "font file copied");
+  // Font file copied exactly once
+  assert.ok(fs.existsSync(path.join(dir, "fonts", descriptor.file)), "font file copied");
 
-  // readFonts passes the variable keys through unchanged
+  // readFonts returns the whole ramp with variable keys preserved
   const fonts = readFonts(dir);
-  assert.equal(fonts.length, 1, "one variant");
-  const v = fonts[0];
-  assert.equal(v.variable, true, "readFonts preserves variable");
-  assert.deepEqual(v.axes, axes, "readFonts preserves axes");
-  assert.deepEqual(v.instances, instances, "readFonts preserves instances");
+  assert.equal(fonts.length, 9, "nine ramp variants");
+  for (const v of fonts) {
+    assert.equal(v.variable, true, "readFonts preserves variable");
+    assert.deepEqual(v.axes, axes, "readFonts preserves axes");
+    assert.deepEqual(v.instances, instances, "readFonts preserves instances");
+  }
 
-  // Idempotent re-add
+  // Idempotent re-add: ramp stays at 9 (no duplicates)
   addVariableFont(dir, { file: VF_FIXTURE, family: "Google Sans Flex", axes, instances });
-  assert.equal(readFonts(dir).length, 1, "re-add stays at one variant");
+  assert.equal(readFonts(dir).length, 9, "re-add stays at nine variants");
 });
 
 test("addVariableFont omits instances key when none are supplied", async (t) => {
@@ -499,8 +513,11 @@ test("addVariableFont omits instances key when none are supplied", async (t) => 
   const { addVariableFont } = await import("../store/fonts.mjs");
   const { readFvar } = await import("../store/fvar.mjs");
   const { axes } = readFvar(fs.readFileSync(VF_FIXTURE));
-  const variant = addVariableFont(dir, { file: VF_FIXTURE, family: "VF NoInst", axes, instances: [] });
-  assert.ok(!("instances" in variant), "no instances key when empty");
+  const descriptor = addVariableFont(dir, { file: VF_FIXTURE, family: "VF NoInst", axes, instances: [] });
+  assert.ok(!("instances" in descriptor), "no instances key on descriptor when empty");
+  for (const v of descriptor.variants) {
+    assert.ok(!("instances" in v), "no instances key on variant when empty");
+  }
 });
 
 test("encodeTransitFontVariants emits ~:variable/~:axes/~:instances for variable variants", async () => {

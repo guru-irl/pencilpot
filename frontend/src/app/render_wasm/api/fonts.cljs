@@ -44,9 +44,36 @@
         result (:uuid font)]
     (or result uuid/zero)))
 
+(def ^:private canonical-uuid-re
+  #"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
+(defn- slug->uuid
+  "Derive a STABLE, collision-resistant UUID from an arbitrary (non-uuid)
+  custom-font slug. Penpot's `uuid/uuid` parses by FIXED hex slices, so two
+  different slugs (e.g. \"custom-gsflex-text\" and \"custom-gsflex-wide\")
+  collapse to the SAME bytes — distinct fonts would then share one WASM
+  typeface alias. We instead hash the slug into all four u32 parts so distinct
+  slugs map to distinct UUIDs. Must be deterministic so the span alias and the
+  typeface-registration alias always agree."
+  [s]
+  (let [h     (fn [salt] (unchecked-int (hash (str salt "|" s))))
+        u32   (fn [salt] (bit-and (h salt) 0xFFFFFFFF))]
+    (uuid/from-unsigned-parts (u32 0) (u32 1) (u32 2) (u32 3))))
+
+(defn- custom-suffix
+  "The part of a `custom-…` font-id after the first `-`."
+  [font-id]
+  (subs font-id (inc (str/index-of font-id "-"))))
+
 (defn- custom-font-id->uuid
   [font-id]
-  (uuid/uuid (subs font-id (inc (str/index-of font-id "-")))))
+  (let [suffix (custom-suffix font-id)]
+    ;; Real Penpot custom fonts encode a canonical uuid after `custom-`; keep
+    ;; those byte-identical. Pencilpot custom/variable fonts use a human slug
+    ;; (e.g. \"custom-google-sans-flex\") — hash it to a stable uuid.
+    (if (re-matches canonical-uuid-re suffix)
+      (uuid/uuid suffix)
+      (slug->uuid suffix))))
 
 (defn- font-backend
   [font-id]
@@ -96,9 +123,17 @@
     :google
     font-id
     :custom
-    (let [font-uuid (custom-font-id->uuid font-id)
+    ;; `state[:fonts]` keys each variant by its raw `:font-id` STRING from
+    ;; get-font-variants — for Penpot custom fonts a uuid, for pencilpot
+    ;; custom/variable fonts a slug (e.g. "custom-google-sans-flex"). The
+    ;; content font-id is the family id `custom-<that>`, so the part after the
+    ;; first `custom-` (the `custom-suffix`) is exactly the registry key.
+    ;; Compare by string: the previous code compared a UUID OBJECT against the
+    ;; string and never matched for slug fonts, so the typeface (variable fonts
+    ;; included) was never fetched/stored into WASM on load.
+    (let [suffix (custom-suffix font-id)
           matching-font (some (fn [[_ font]]
-                                (and (= (:font-id font) font-uuid)
+                                (and (= (str (:font-id font)) suffix)
                                      (= (str (:font-weight font)) (str font-weight))
                                      font))
                               (seq @fonts))]
@@ -224,14 +259,25 @@
     0))
 
 (defn normalize-font-id
+  "Resolve a content font-id to the WASM typeface-alias UUID. This MUST agree
+  with `font-id->uuid` (used by `store_font` to register the typeface) so the
+  span's font-family alias resolves to the registered typeface — otherwise the
+  text falls back to the default font (and variable-font axes have no VF to
+  apply to)."
   [font-id]
   (try
-    (if ^boolean (str/starts-with? font-id "gfont-")
+    (cond
+      (str/starts-with? font-id "gfont-")
       (google-font-id->uuid font-id)
-      (let [no-prefix (subs font-id (inc (str/index-of font-id "-")))]
-        (if (or (nil? no-prefix) (not (string? no-prefix)) (str/blank? no-prefix))
+
+      (str/starts-with? font-id "custom-")
+      (let [suffix (custom-suffix font-id)]
+        (if (or (nil? suffix) (not (string? suffix)) (str/blank? suffix))
           uuid/zero
-          (uuid/parse no-prefix))))
+          (custom-font-id->uuid font-id)))
+
+      :else
+      uuid/zero)
     (catch :default _e
       uuid/zero)))
 

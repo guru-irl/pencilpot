@@ -132,24 +132,32 @@ export function addFont(projectRoot, { file, family, weight = 400, style = "norm
   return variant;
 }
 
+/** Weight ramp registered for a variable font (one entry per slot, all sharing
+ *  the single VF file). Mirrors how Penpot models a custom family + how the
+ *  DefaultLauncher VF was hand-registered. */
+const VF_WEIGHT_RAMP = [100, 200, 300, 400, 500, 600, 700, 800, 900];
+
 /**
  * Add a variable font file to the project.
  *
  * Options:
  *   file       — absolute path to the source font file (required, must exist)
  *   family     — font family name (required; derived from filename if omitted)
- *   fontId     — optional stable font-group id; defaults to `vf-<slug(family)>`
+ *   fontId     — optional stable font-group id; defaults to `custom-<slug(family)>`
  *   axes       — array of { tag, min, default, max, name } (required, non-empty)
  *   instances  — optional array of { name, coords } named instances
  *
- * Copies the file into `<projectRoot>/fonts/<id><ext>` and writes ONE variant
- * descriptor carrying `variable: true`, the axes, and (if any) the instances.
- * The variant id equals the fontId so the whole variable family is one entry.
- * Idempotent: any existing variant with the same id is replaced.
+ * Copies the file into `<projectRoot>/fonts/<fontId><ext>` ONCE and writes a
+ * FULL WEIGHT RAMP (100–900) of variant descriptors that all share that single
+ * VF file, each carrying `variable: true` + axes (+ instances). The fontId is
+ * `custom-<slug>` so the renderer classifies the family as a loadable :custom
+ * font (the `font-backend` only treats `custom-`/`gfont-` prefixes as loadable;
+ * a `vf-` prefix was misclassified as :builtin and never loaded), and weight
+ * matching against the content's font-weight resolves a variant per weight.
  *
- * The variant's `weight` is taken from the `wght` axis default (else 400) and
- * `style` is always "normal" (italic is expressed through the `slnt`/`ital`
- * axes for variable fonts).
+ * Idempotent: every variant id for this family (`<fontId>-w<weight>`) is
+ * replaced on re-add. Returns the family descriptor:
+ *   { fontId, family, file, format, variable, axes, instances?, variants:[…] }
  */
 export function addVariableFont(projectRoot, { file, family, fontId, axes, instances } = {}) {
   if (!file) throw new Error("addVariableFont: file is required");
@@ -166,40 +174,45 @@ export function addVariableFont(projectRoot, { file, family, fontId, axes, insta
   const format = detectFormat(file);
   const ext = path.extname(file).toLowerCase();
 
-  // The whole variable font is a single entry keyed by fontId.
-  const fId = fontId ?? `vf-${slugify(family)}`;
-  const id = fId;
-
-  // Default weight = the wght axis default, else 400.
-  const wghtAxis = axes.find((a) => a.tag === "wght");
-  const weight = wghtAxis && Number.isFinite(wghtAxis.default) ? Math.round(wghtAxis.default) : 400;
+  // Family-level font-id. MUST start with `custom-` so the renderer's
+  // `font-backend` classifies it as a loadable custom font.
+  let fId = fontId ?? `custom-${slugify(family)}`;
+  if (!fId.startsWith("custom-")) fId = `custom-${fId}`;
 
   const dir = fontsDir(projectRoot);
   fs.mkdirSync(dir, { recursive: true });
 
-  const destFile = `${id}${ext}`;
-  const destPath = path.join(dir, destFile);
-  fs.copyFileSync(file, destPath);
+  // Single shared VF binary, named after the family font-id.
+  const destFile = `${fId}${ext}`;
+  fs.copyFileSync(file, path.join(dir, destFile));
 
-  // Update fonts.json (idempotent re-add)
+  const hasInstances = Array.isArray(instances) && instances.length > 0;
+
+  // Write a variant per weight in the ramp, all pointing at the one file.
   const data = readFontsJson(projectRoot);
-  data.variants = data.variants.filter((v) => v.id !== id);
-  const variant = {
-    id,
-    fontId: fId,
-    family,
-    weight,
-    style: "normal",
-    file: destFile,
-    format,
-    variable: true,
-    axes,
-  };
-  if (Array.isArray(instances) && instances.length > 0) {
-    variant.instances = instances;
-  }
-  data.variants.push(variant);
+  // Drop any prior ramp entries for this family (idempotent re-add).
+  data.variants = data.variants.filter((v) => v.fontId !== fId);
+
+  const variants = VF_WEIGHT_RAMP.map((weight) => {
+    const variant = {
+      id: `${fId}-w${weight}`,
+      fontId: fId,
+      family,
+      weight,
+      style: "normal",
+      file: destFile,
+      format,
+      variable: true,
+      axes,
+    };
+    if (hasInstances) variant.instances = instances;
+    return variant;
+  });
+
+  data.variants.push(...variants);
   fs.writeFileSync(fontsJsonPath(projectRoot), JSON.stringify(data, null, 2));
 
-  return variant;
+  const descriptor = { fontId: fId, family, file: destFile, format, variable: true, axes, variants };
+  if (hasInstances) descriptor.instances = instances;
+  return descriptor;
 }
