@@ -766,12 +766,25 @@
   (ptk/reify ::commit-position-data
     ptk/UpdateEvent
     (update [_ state]
-      (let [ids (keys (::update-position-data state))]
-        (update state :workspace-text-modifier #(apply dissoc % ids))))
+      ;; Snapshot the pending position-data AND clear the debounce flag + queue
+      ;; atomically here, before `update-shapes` runs in the WatchEvent below.
+      ;; Previously the flag/queue were cleared in a later rx/concat step after
+      ;; update-shapes; an `update-position-data` arriving in that window was
+      ;; written into `::update-position-data` after the take-1 listener had
+      ;; already completed, then silently dropped by the teardown — leaving the
+      ;; shape painted with stale glyphs until the next edit (the "axis/weight
+      ;; edit sometimes doesn't render immediately" race, hit under a continuous
+      ;; drag/scrub flood). Clearing the flag here lets any late edit start a
+      ;; fresh debounce cycle instead of being lost.
+      (let [pending (::update-position-data state)]
+        (-> state
+            (update :workspace-text-modifier #(apply dissoc % (keys pending)))
+            (assoc ::committing-position-data pending)
+            (dissoc ::update-position-data-debounce ::update-position-data))))
 
     ptk/WatchEvent
     (watch [_ state _]
-      (let [position-data (::update-position-data state)]
+      (let [position-data (::committing-position-data state)]
         (rx/concat
          (rx/of (dwsh/update-shapes
                  (keys position-data)
@@ -780,7 +793,7 @@
                        (assoc :position-data (get position-data (:id shape)))))
                  {:stack-undo? true :reg-objects? false}))
          (rx/of (fn [state]
-                  (dissoc state ::update-position-data-debounce ::update-position-data))))))))
+                  (dissoc state ::committing-position-data))))))))
 
 (defn update-position-data
   [id position-data]
