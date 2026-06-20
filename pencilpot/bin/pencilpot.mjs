@@ -197,6 +197,13 @@ async function cmdOpen(positional, flags) {
   }
 
   const wsUrl = fileId
+    // Default to the stable SVG renderer. The render-wasm path drives a
+    // continuous WebGL2 canvas that glitches badly on pan/zoom in this
+    // environment, and it is NOT required for variable fonts: the browser
+    // renders font-variation-settings natively on SVG/HTML text (proven with
+    // the project's own VF file). VF support is being implemented in the SVG
+    // path (variable @font-face + font-variation-settings emission). Append
+    // `&wasm=true` manually only if you need to compare against render-wasm.
     ? `http://localhost:${port}/#/workspace?team-id=${TEAM_ID}&file-id=${fileId}`
     : `http://localhost:${port}/`;
 

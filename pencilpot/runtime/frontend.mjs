@@ -30,7 +30,11 @@ function buildStamp() {
 export function configJs({ publicUri = "", fileId = null, teamId = null } = {}) {
   const stamp = buildStamp();
   return `globalThis.penpotPublicURI=${publicUri ? JSON.stringify(publicUri) : "location.origin"};`
-    + `globalThis.penpotFlags="";`
+    // `disable-render-wasm-info` strips the upstream dev default that paints a
+    // "WebGL rendering" debug label on the wasm canvas every frame. penpotFlags=""
+    // would otherwise inherit common/flags `default` (a dev flag set), leaving the
+    // debug overlay visible in a shipped pencilpot session.
+    + `globalThis.penpotFlags="disable-render-wasm-info";`
     + `globalThis.pencilpotFile=${JSON.stringify({ fileId, teamId })};`
     + `globalThis.pencilpotBuild=${JSON.stringify(stamp)};`
     + `console.log("%c pencilpot %c build ${stamp.commit} · bundle ${stamp.bundle} ","background:#7b61ff;color:#fff;border-radius:3px","color:#7b61ff");`
