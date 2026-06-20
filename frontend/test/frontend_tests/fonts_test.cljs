@@ -124,3 +124,34 @@
           result (fonts/find-closest-variant font "200" nil)]
       (t/is (= "200" (:weight result)))
       (t/is (= "italic" (:style result))))))
+
+(def sample-variable-font
+  {:id "custom-google-sans-flex"
+   :family "Google Sans Flex"
+   :variable true
+   :axes [{:tag "wght" :min 100 :max 900 :default 400 :name "Weight"}
+          {:tag "wdth" :min 25 :max 151 :default 100 :name "Width"}
+          {:tag "slnt" :min -10 :max 0 :default 0 :name "Slant"}]
+   :variants [{:id "normal-100" :style "normal" :weight "100"
+               :app.main.fonts/woff1-file-id "vf-file-id"}]})
+
+(t/deftest generate-variable-font-css-test
+  (let [css (fonts/generate-variable-font-css sample-variable-font)]
+    (t/testing "single @font-face for the family"
+      (t/is (= 1 (count (re-seq #"@font-face" css))))
+      (t/is (re-find #"font-family: 'Google Sans Flex'" css)))
+    (t/testing "wght axis -> font-weight range"
+      (t/is (re-find #"font-weight: 100 900" css)))
+    (t/testing "wdth axis -> font-stretch percent range"
+      (t/is (re-find #"font-stretch: 25% 151%" css)))
+    (t/testing "no format() hint (browser sniffs)"
+      (t/is (not (re-find #"format\(" css))))
+    (t/testing "src points at the single VF file id"
+      (t/is (re-find #"vf-file-id" css)))))
+
+(t/deftest variable-font-without-axes-defaults-test
+  (let [css (fonts/generate-variable-font-css
+             {:family "X" :variable true :axes []
+              :variants [{:app.main.fonts/woff1-file-id "id1"}]})]
+    (t/is (re-find #"font-weight: 1 1000" css))
+    (t/is (re-find #"font-stretch: normal" css))))

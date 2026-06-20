@@ -192,11 +192,55 @@
             :weight (:weight variant)
             :uri (asset-id->uri (::woff1-file-id variant))}))
 
+(def variable-font-face-template
+  "@font-face {
+    font-family: '%(family)s';
+    font-style: normal;
+    font-weight: %(weight)s;
+    font-stretch: %(stretch)s;
+    font-display: block;
+    src: url(%(uri)s);
+  }")
+
+(defn- axis-by-tag
+  [axes tag]
+  (d/seek #(= tag (:tag %)) axes))
+
+(defn- vf-weight-range
+  "CSS font-weight range from the wght axis, or a permissive default."
+  [axes]
+  (if-let [a (axis-by-tag axes "wght")]
+    (str (:min a) " " (:max a))
+    "1 1000"))
+
+(defn- vf-stretch-range
+  "CSS font-stretch percent range from the wdth axis, or `normal`."
+  [axes]
+  (if-let [a (axis-by-tag axes "wdth")]
+    (str (:min a) "% " (:max a) "%")
+    "normal"))
+
+(defn generate-variable-font-css
+  "A single variable @font-face for a `:variable` custom font. The wght/wdth
+   axes become CSS font-weight/font-stretch RANGES so the browser exposes the
+   axis range; all other axes (slnt, opsz, GRAD, ...) are driven per-text via
+   `font-variation-settings` (see text/styles.cljs). No format() hint is emitted
+   so the browser sniffs the served file."
+  [{:keys [family axes variants]}]
+  (let [variant (first variants)]
+    (str/fmt variable-font-face-template
+             {:family family
+              :weight (vf-weight-range axes)
+              :stretch (vf-stretch-range axes)
+              :uri (asset-id->uri (::woff1-file-id variant))})))
+
 (defn- generate-custom-font-css
-  [{:keys [family variants] :as font}]
-  (->> variants
-       (map #(generate-custom-font-variant-css family %))
-       (str/join "\n")))
+  [{:keys [family variants variable] :as font}]
+  (if variable
+    (generate-variable-font-css font)
+    (->> variants
+         (map #(generate-custom-font-variant-css family %))
+         (str/join "\n"))))
 
 (defmethod load-font :custom
   [{:keys [id ::on-loaded] :as font}]
@@ -367,9 +411,10 @@
              (rx/map process-gfont-css)))
 
       (= :custom backend)
-      (let [variant (get-variant font font-variant-id)
-            result  (generate-custom-font-variant-css family variant)]
-        (rx/of result))
+      (rx/of (if (:variable font)
+               (generate-variable-font-css font)
+               (generate-custom-font-variant-css
+                family (get-variant font font-variant-id))))
 
       :else
       (let [{:keys [weight style suffix]} (get-variant font font-variant-id)
