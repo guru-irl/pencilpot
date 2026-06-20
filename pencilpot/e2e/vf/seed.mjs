@@ -15,7 +15,12 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const SRC = "/mnt/data/src/DefaultLauncher";
+// The VF-axis fixture lives in pencilpot-vftest: a copy of the design system
+// whose "LAUNCHER" heading is set to the VARIABLE font (custom-custom-google-sans-flex)
+// so axis edits are observable. (The canonical design system at
+// /mnt/data/src/DefaultLauncher/design uses the STATIC width families and is not
+// the right fixture for axis testing.)
+const SRC = "/mnt/data/src/pencilpot-vftest";
 const SRC_DESIGN = path.join(SRC, "designs/default-design-system");
 const VF_PAGE = "a0b0c325-382e-80da-8008-238861a34c9c.edn";
 const TARGET_TEXT = "LAUNCHER"; // the auto-width VF heading we mutate
