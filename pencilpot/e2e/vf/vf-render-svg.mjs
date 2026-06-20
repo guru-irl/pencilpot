@@ -40,6 +40,23 @@ const FID = "67e207c3-ec3b-80d7-8008-252de1d3a44e";
 // UI-edit harness drives; in SVG mode its wrapper is `#shape-<uuid>`.
 const VF_SHAPE_ID = "a0b0c325-382e-80da-8008-2388fc7353bb";
 const VF_ASSET_HINT = "custom-google-sans-flex"; // /assets/by-id/custom-google-sans-flex-wNNN
+const VF_PAGE = "a0b0c325-382e-80da-8008-238861a34c9c.edn";
+
+// Strip the stored `:position-data` from the VF heading shape so the workspace
+// regenerates it from the content tree (which carries `:font-variation-settings`).
+// The shipped value is a bare rect with no font fields, so without this the
+// stable SVG renderer paints static/blank glyphs and never picks up the axes.
+function stripHeadingPositionData(designDir) {
+  const pagePath = path.join(designDir, "pages", VF_PAGE);
+  let edn = fs.readFileSync(pagePath, "utf8");
+  const before = edn;
+  // From the heading shape's :id to its own (next) :position-data, set it nil.
+  edn = edn.replace(
+    new RegExp(`(:id #uuid "${VF_SHAPE_ID}"[\\s\\S]*?):position-data \\[[^\\]]*\\]`),
+    "$1:position-data nil");
+  if (edn === before) throw new Error("strip: heading :position-data not found to nil-out");
+  fs.writeFileSync(pagePath, edn);
+}
 
 const CHROME_ARGS = [
   "--use-gl=angle",
@@ -124,6 +141,15 @@ async function boot(projectRoot, port) {
     await page.keyboard.press("Shift+2"); // zoom-to-selection
     await page.waitForTimeout(1500);
     await page.evaluate(() => document.fonts.ready);
+    // position-data regeneration is async (overlay measurement -> update-position-data
+    // -> re-render), and only THEN does the variable @font-face binary get fetched.
+    // Poll up to ~12s for the VF asset to appear in network before settling.
+    {
+      const deadline = Date.now() + 12000;
+      while (fontAssets.length === 0 && Date.now() < deadline) {
+        await page.waitForTimeout(300);
+      }
+    }
     await page.keyboard.press("Escape"); // drop selection so handles aren't shot
     await page.waitForTimeout(1500); // settle (page is idle in SVG mode)
 
@@ -148,9 +174,12 @@ async function main() {
   const dirA = path.join(tmp, "A"), dirB = path.join(tmp, "B");
   const shotA = path.join(tmp, "wdth25.png"), shotB = path.join(tmp, "wdth151.png");
 
-  // Two copies differing ONLY in the width axis.
-  seed(dirA, { wdth: 25 });
-  seed(dirB, { wdth: 151 });
+  // Two copies differing ONLY in the width axis. Strip the heading's stored
+  // :position-data in each so the workspace regenerates it (carrying the axes).
+  const seededA = seed(dirA, { wdth: 25 });
+  const seededB = seed(dirB, { wdth: 151 });
+  stripHeadingPositionData(seededA.designDir);
+  stripHeadingPositionData(seededB.designDir);
 
   let ok = true;
   const allErrors = [];

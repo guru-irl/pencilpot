@@ -93,6 +93,7 @@
                                              :textDecoration (:text-decoration data)
                                              :letterSpacing (:letter-spacing data)
                                              :fontStyle (:font-style data)
+                                             :fontVariationSettings (:font-variation-settings data)
                                              :direction (:direction data)
                                              :whiteSpace "pre"}
                                         (obj/set! "fill" (str "url(#fill-" index "-" render-id ")")))}

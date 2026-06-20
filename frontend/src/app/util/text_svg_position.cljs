@@ -105,6 +105,9 @@
                      :text-decoration (dm/str (get-prop styles "text-decoration"))
                      :letter-spacing  (dm/str (get-prop styles "letter-spacing"))
                      :font-style      (dm/str (get-prop styles "font-style"))
+                     :font-variation-settings
+                     (let [v (get-prop styles "font-variation-settings")]
+                       (when (and (some? v) (not= v "normal")) v))
                      :fills           (transit/decode-str (get-prop styles "--fills"))
                      :text            text})))]
 
