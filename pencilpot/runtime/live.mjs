@@ -13,6 +13,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import { status as worktreeStatus } from "./worktree.mjs";
 
 // ── Tunables ──────────────────────────────────────────────────────────────────
 
@@ -177,6 +178,19 @@ export function getLiveWatcher() {
   return _globalWatcher;
 }
 
+/**
+ * Broadcast the design's unsaved/saved status to every connected SSE client.
+ * The injected save-manager script (frontend.mjs) listens for these `status`
+ * events to drive the dirty indicator, Ctrl/Cmd+S handling and the unload guard.
+ */
+export function broadcastStatus(dirty, revn) {
+  const payload = `event: status\ndata: ${JSON.stringify({ dirty: !!dirty, revn: revn ?? 0 })}\n\n`;
+  const { clients } = getLiveWatcher();
+  for (const client of clients) {
+    try { client.write(payload); } catch { clients.delete(client); }
+  }
+}
+
 // ── HTTP handler for GET /pencilpot/live (SSE) ───────────────────────────────
 
 /**
@@ -197,6 +211,13 @@ export function handleLiveSse(req, res, watcher) {
 
   // Send an initial comment to flush headers and confirm the stream is open.
   res.write(": pencilpot-live\n\n");
+
+  // Send the current unsaved/saved status so a freshly-loaded SPA shows the
+  // correct dirty indicator without waiting for the next edit.
+  try {
+    const st = worktreeStatus();
+    res.write(`event: status\ndata: ${JSON.stringify({ dirty: !!st.dirty, revn: st.revn ?? 0 })}\n\n`);
+  } catch { /* worktree not initialised yet — ignore */ }
 
   const client = {
     write(data) { res.write(data); },

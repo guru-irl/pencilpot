@@ -2,12 +2,12 @@
 // boot stubs for all other SPA endpoints.
 import path from "node:path";
 import { createSession } from "../../headless-core/target/headless/penpot.js";
-import { readDesign, writeDesign } from "../store/index.mjs";
+import { getStore, stage } from "./worktree.mjs";
 import { readFonts } from "../store/fonts.mjs";
 import { resolveProjectRoot, resolveProject } from "../store/project.mjs";
 import { readBody } from "./proxy.mjs";
 import { stub, isStub, buildUpdateFileResponse } from "./stubs.mjs";
-import { noteSelfWrite } from "./live.mjs";
+import { broadcastStatus } from "./live.mjs";
 
 /** Extract the RPC command name from a URL like /api/main/methods/get-file?... */
 const cmd = (url) => url.split("?")[0].split("/").filter(Boolean).pop();
@@ -15,9 +15,10 @@ const cmd = (url) => url.split("?")[0].split("/").filter(Boolean).pop();
 /** Extract a query-param value from a URL string. */
 const qp = (url, key) => new URL("http://h" + url).searchParams.get(key);
 
-/** Hydrate a session from the on-disk store at `dir`. */
+/** Hydrate a session from the working copy (in-memory for the open design,
+ *  on-disk for any other dir). */
 function sessionFor(dir) {
-  return createSession(JSON.stringify({ fromStore: readDesign(dir) }));
+  return createSession(JSON.stringify({ fromStore: getStore(dir) }));
 }
 
 /**
@@ -36,19 +37,19 @@ function transitGet(transitStr, keyword) {
 }
 
 /**
- * Hydrate -> applyFn(session) -> bump revn -> serialize -> write.
+ * Hydrate -> applyFn(session) -> bump revn -> serialize -> STAGE in memory.
  * Returns { revn } so callers can embed it in the response.
  *
- * Calls noteSelfWrite() immediately AFTER the disk write so the live-update
- * watcher adopts the just-written content as its baseline — the fs events this
- * write generates then resolve to an unchanged signature and never reload.
+ * Manual-save model: changes are staged into the in-memory working copy and the
+ * design is marked dirty (a `status` SSE event notifies the SPA).  Nothing is
+ * written to disk until an explicit Save (see server.mjs /pencilpot/save).
  */
 function persistChanges(dir, applyFn) {
   const s = sessionFor(dir);
   applyFn(s);
   const revn = s.bumpRevn();
-  writeDesign(dir, JSON.parse(s.serializeStore()));
-  noteSelfWrite();                             // ← adopt new content as baseline
+  stage(dir, JSON.parse(s.serializeStore()), revn);   // ← in memory, not disk
+  broadcastStatus(true, revn);                        // ← mark SPA "unsaved"
   return { revn };
 }
 
@@ -117,7 +118,7 @@ function parseLibrariesFromManifest(manifestEdn) {
  * needed by the SPA; `get-file?id=<libId>` serves the full transit payload.
  */
 export function getFileLibraries(designDir, projectRoot) {
-  const manifest = readDesign(designDir).manifest;
+  const manifest = getStore(designDir).manifest;
   const refs = parseLibrariesFromManifest(manifest);
   return refs.map(({ id, path: libPath }) => {
     const libDir = path.join(projectRoot, libPath);
@@ -246,7 +247,7 @@ export async function handleRpc(req, res, cfg) {
     let serveDir = cfg.design;
     if (reqId && cfg.design) {
       const projectRoot = cfg.project ?? resolveProjectRoot(cfg.design);
-      const libRefs = parseLibrariesFromManifest(readDesign(cfg.design).manifest);
+      const libRefs = parseLibrariesFromManifest(getStore(cfg.design).manifest);
       const ref = libRefs.find(({ id }) => id === reqId);
       if (ref) serveDir = path.join(projectRoot, ref.path);
     }

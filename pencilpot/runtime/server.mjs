@@ -7,7 +7,8 @@ import { serveStatic } from "./static.mjs";
 import { resolveProject } from "../store/project.mjs";
 import { readFonts } from "../store/fonts.mjs";
 import { handleGfontsCSS, handleGfontsFont } from "./gfonts.mjs";
-import { startLiveWatcher, handleLiveSse } from "./live.mjs";
+import { startLiveWatcher, handleLiveSse, noteSelfWrite, broadcastStatus } from "./live.mjs";
+import { initWorktree, save as saveWorktree, discard as discardWorktree, status as worktreeStatus } from "./worktree.mjs";
 import { attachTerminal } from "./terminal.mjs";
 
 const PORT = Number(process.env.PENCILPOT_PORT ?? 7777);
@@ -46,6 +47,10 @@ function resolveDesignDir() {
 }
 
 const { designDir, projectRoot } = resolveDesignDir();
+
+// Bind the in-memory working copy to the open design.  Manual-save model:
+// update-file stages edits in memory; disk is written only on /pencilpot/save.
+initWorktree(designDir);
 
 export const CONFIG = {
   project: projectRoot ?? process.env.PENCILPOT_PROJECT ?? null,
@@ -127,6 +132,30 @@ const server = http.createServer(async (req, res) => {
     // Live-update SSE endpoint — must be before serveStatic.
     if (req.method === "GET" && req.url === "/pencilpot/live") {
       return handleLiveSse(req, res, liveWatcher);
+    }
+
+    // Manual save: flush the in-memory working copy to disk (Ctrl/Cmd+S).
+    if (req.method === "POST" && req.url === "/pencilpot/save") {
+      const r = saveWorktree();
+      noteSelfWrite();                 // disk now == working copy → no false "external change"
+      broadcastStatus(false, r.revn);  // clear the dirty indicator in all windows
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(r));
+      return;
+    }
+    // Discard unsaved edits: revert the working copy to the on-disk version.
+    if (req.method === "POST" && req.url === "/pencilpot/discard") {
+      const r = discardWorktree();
+      broadcastStatus(false, r.revn);
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ...r, reload: true }));
+      return;
+    }
+    // Current unsaved/saved status (initial sync / polling fallback).
+    if (req.method === "GET" && req.url === "/pencilpot/status") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(worktreeStatus()));
+      return;
     }
 
     if (req.url.startsWith("/api/")) return await handleRpc(req, res, CONFIG);
