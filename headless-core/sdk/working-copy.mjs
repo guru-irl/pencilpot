@@ -25,6 +25,15 @@ export class WorkingCopy {
   createComponent(boardId, opts = {}) { return this.session.createComponent(boardId, JSON.stringify(opts)); }
   instantiateComponent(componentId, opts) { return this.session.instantiateComponent(componentId, JSON.stringify(opts)); }
 
+  // Map families onto a variable font WITH per-family axis settings (wdth/opsz/…).
+  // mapping: { "Family Name": { fontId, family, axes: { wdth: 62.5, opsz: 120 } } }.
+  // NOTE: this is a whole-file :data transform (not a recorded change), so it does
+  // NOT round-trip through commit(); use it with serializeStore()-based persistence
+  // (the `pencilpot map-variable` CLI is the supported path for local designs).
+  mapFontsToVariable(mapping) { return this.session.mapFontsToVariable(JSON.stringify(mapping)); }
+  retargetFonts(mapping)      { return this.session.retargetFonts(JSON.stringify(mapping)); }
+  serializeStore()            { return JSON.parse(this.session.serializeStore()); }
+
   addColorToken(opts) { return this.session.addColorToken(JSON.stringify(opts)); }
   tokens() { return JSON.parse(this.session.tokens()); }
 

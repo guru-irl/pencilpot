@@ -38,8 +38,8 @@ function parseArgs(argv) {
       const key = a.slice(2);
       const next = args[i + 1];
       if (next !== undefined && !next.startsWith("--")) {
-        // Accumulate multi-value flags (e.g. --family can appear multiple times)
-        if (key === "family") {
+        // Accumulate multi-value flags (e.g. --family / --map can repeat)
+        if (key === "family" || key === "map") {
           if (!Array.isArray(flags[key])) flags[key] = [];
           flags[key].push(next);
         } else {
@@ -465,6 +465,106 @@ async function cmdRetargetFonts(positional, flags) {
   console.log("Families rewritten:", Object.keys(mapping).join(", "));
 }
 
+// ---------------------------------------------------------------------------
+// map-variable command — map families onto a variable font WITH per-family
+// axis settings (wdth/opsz/GRAD/ROND/slnt). Realises true variable-font widths
+// (e.g. Condensed/Compressed/Wide) that static instances can't express, and
+// folds non-Google families (Bebas Neue, Archivo) onto the variable font.
+// ---------------------------------------------------------------------------
+async function cmdMapVariable(positional, flags) {
+  const arg = positional[0];
+  if (!arg) {
+    console.error('Usage: pencilpot map-variable <project> --font-id <id> [--var-family <name>] --map "Family=wdth:62.5,opsz:120" [--map …] [--design <name>]');
+    process.exit(1);
+  }
+
+  const fontId = flags["font-id"];
+  if (!fontId) {
+    console.error("--font-id <variable-font-id> is required (e.g. custom-google-sans-flex).");
+    process.exit(1);
+  }
+  const varFamily = flags["var-family"] || "Google Sans Flex";
+  const mapFlags = flags["map"]; // string[] | undefined
+  if (!mapFlags || mapFlags.length === 0) {
+    console.error('At least one --map "Family=tag:value,…" is required.');
+    process.exit(1);
+  }
+
+  // Build mapping: { "Source Family": { fontId, family, axes: {tag: number} } }
+  const mapping = {};
+  for (const entry of mapFlags) {
+    const eqIdx = entry.indexOf("=");
+    if (eqIdx < 1) {
+      console.error(`Invalid --map value "${entry}" — expected "Family Name=tag:value,…"`);
+      process.exit(1);
+    }
+    const srcFamily = entry.slice(0, eqIdx).trim();
+    const axisSpec = entry.slice(eqIdx + 1).trim();
+    const axes = {};
+    if (axisSpec) {
+      for (const pair of axisSpec.split(",")) {
+        const m = /^\s*([A-Za-z]{1,4})\s*[:=]\s*(-?\d+(?:\.\d+)?)\s*$/.exec(pair);
+        if (!m) {
+          console.error(`Invalid axis spec "${pair}" in --map "${entry}" — expected tag:value (e.g. wdth:62.5)`);
+          process.exit(1);
+        }
+        axes[m[1]] = Number(m[2]);
+      }
+    }
+    mapping[srcFamily] = { fontId, family: varFamily, axes };
+  }
+
+  const { resolveProject } = await import("../store/project.mjs");
+  const { readDesign, writeDesign } = await import("../store/store.mjs");
+  const { createSession } = await import("../../headless-core/target/headless/penpot.js");
+
+  let proj;
+  try {
+    proj = resolveProject(path.resolve(arg));
+  } catch (e) {
+    console.error(`Error resolving project: ${e.message}`);
+    process.exit(1);
+  }
+  const designName = flags["design"] || proj.default;
+  if (!designName) {
+    console.error("No default design and no --design flag. Use --design <name>.");
+    process.exit(1);
+  }
+  const designEntry = proj.designs.find((d) => d.name === designName);
+  if (!designEntry) {
+    console.error(`Design "${designName}" not found in project.`);
+    process.exit(1);
+  }
+  const designDir = designEntry.dir;
+
+  console.log(`Variable font: ${fontId}  (family "${varFamily}")`);
+  console.log("Family → axes:");
+  for (const [fam, spec] of Object.entries(mapping)) {
+    const a = Object.entries(spec.axes).map(([t, v]) => `${t}=${v}`).join(", ") || "(defaults)";
+    console.log(`  "${fam}" → ${a}`);
+  }
+
+  const storeParts = readDesign(designDir);
+  const session = createSession(JSON.stringify({ fromStore: storeParts }));
+
+  const baselineErrs = JSON.parse(session.validate());
+  session.mapFontsToVariable(JSON.stringify(mapping));
+  const postErrs = JSON.parse(session.validate());
+  const newErrs = postErrs.filter((e) => !baselineErrs.includes(e));
+  if (newErrs.length > 0) {
+    console.error("Validation introduced new errors after mapFontsToVariable:");
+    for (const e of newErrs) console.error(" ", e);
+    process.exit(1);
+  }
+  if (baselineErrs.length > 0) {
+    console.warn(`  note: ${baselineErrs.length} pre-existing validation issue(s) unchanged (not caused by this command)`);
+  }
+
+  writeDesign(designDir, JSON.parse(session.serializeStore()));
+  console.log(`\nmap-variable complete — design "${designName}" updated.`);
+  console.log("Families mapped to variable font:", Object.keys(mapping).join(", "));
+}
+
 function printHelp() {
   console.log(`
 pencilpot <command> [args] [--flags]
@@ -488,6 +588,10 @@ Commands:
   retarget-fonts <project> [--family "Name=fontId" …]
                                          Rewrite every font-id ref in the design to a
                                          canonical id per family (consolidates duplicates)
+  map-variable <project> --font-id <id>  Map families onto a VARIABLE font with per-family
+       [--var-family <name>]             axis settings (realises true Condensed/Compressed/
+       --map "Family=wdth:62.5,opsz:120"  Wide widths; folds Bebas Neue/Archivo onto it).
+       [--map …] [--design <name>]       Repeat --map per source family.
   install-desktop                         Install as a desktop app
   uninstall-desktop                       Remove the desktop app entry
   --help, -h                              Show this help
@@ -1064,6 +1168,9 @@ switch (cmd) {
     break;
   case "retarget-fonts":
     await cmdRetargetFonts(positional, flags);
+    break;
+  case "map-variable":
+    await cmdMapVariable(positional, flags);
     break;
   case "fonts":
     await cmdFonts(positional, flags);

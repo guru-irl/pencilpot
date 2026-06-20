@@ -431,6 +431,44 @@
                           (assoc meta-m :data data :id file-id))
                body     (t/encode-str resp)]
            (js/JSON.stringify (clj->js {:meta meta-m :transit body}))))
+       :mapFontsToVariable
+       ;; Map families onto a variable font WITH per-family axis settings.
+       ;; mapping: {"Family Name" {"fontId" "custom-…" "family" "Google Sans Flex"
+       ;;                          "axes" {"wdth" 62.5 "opsz" 120 …}}}
+       ;; For any node whose :font-family matches a key: rewrite :font-id,
+       ;; :font-family and :font-variant-id (<style>-<weight>), and MERGE the axis
+       ;; map into :font-variation-settings (existing axes kept unless overridden).
+       ;; :font-weight / :font-size / :font-style are left untouched.
+       ;; Also strips cached :position-data from text shapes so the new font +
+       ;; axes are re-laid-out on load (stale position-data otherwise paints the
+       ;; OLD font/width until the next edit — it only regenerates when nil).
+       (fn [mapping-json]
+         (let [mapping (js->clj (js/JSON.parse mapping-json))
+               transform-node
+               (fn [node]
+                 (if (map? node)
+                   (let [;; drop stale layout cache so it regenerates from the new font
+                         node (if (contains? node :position-data) (dissoc node :position-data) node)]
+                     (if (contains? node :font-family)
+                       (let [spec (get mapping (:font-family node))]
+                         (if spec
+                           (let [weight   (or (:font-weight node) "400")
+                                 style    (if (= "italic" (:font-style node)) "italic" "normal")
+                                 new-fam  (get spec "family" (:font-family node))
+                                 new-id   (get spec "fontId")
+                                 axes     (get spec "axes")
+                                 existing (or (:font-variation-settings node) {})
+                                 merged   (merge existing axes)]
+                             (cond-> node
+                               new-id       (assoc :font-id new-id)
+                               true         (assoc :font-family new-fam
+                                                   :font-variant-id (str style "-" weight))
+                               (seq merged) (assoc :font-variation-settings merged)))
+                           node))
+                       node))
+                   node))]
+           (swap! state update :data (fn [d] (walk/postwalk transform-node d)))
+           js/undefined))
        :retargetFonts
        (fn [mapping-json]
          ;; Walk EVERY map in the file data; for any node that has :font-family

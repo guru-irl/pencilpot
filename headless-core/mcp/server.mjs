@@ -32,6 +32,12 @@ export function createHeadlessMcp({ token, base } = {}) {
     { description: "Return the working copy's object map (id -> shape).", inputSchema: {} },
     async () => text(JSON.parse(need().session.objects())));
 
+  server.registerTool("map_fonts_variable",
+    { description: "Map text families onto a variable font WITH per-family axis settings (wdth/opsz/GRAD/ROND/slnt) and strip stale position-data so the new widths re-layout. mapping: {\"Family Name\": {fontId, family, axes:{wdth:62.5, opsz:120}}}. Whole-file :data transform — does NOT round-trip through commit(); persist with the `pencilpot map-variable` CLI for local designs.",
+      inputSchema: { mapping: z.record(z.object({ fontId: z.string(), family: z.string().optional(), axes: z.record(z.number()).optional() })) } },
+    async ({ mapping }) => { const w = need(); w.mapFontsToVariable(mapping);
+      return text({ mappedFamilies: Object.keys(mapping), validation: w.validate(), note: "applied to working copy :data; persist via `pencilpot map-variable` CLI" }); });
+
   server.registerTool("validate",
     { description: "Validate the working copy with Penpot's own validator (empty array = valid).", inputSchema: {} },
     async () => text(need().validate()));
