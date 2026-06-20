@@ -65,6 +65,16 @@
       (some? line-height)       (obj/set! "lineHeight" line-height)
       (some? text-align)        (obj/set! "textAlign" text-align))))
 
+(defn variation-settings->css
+  "Turn a {tag-string -> number} map into a CSS `font-variation-settings`
+   value: {\"slnt\" -10 \"wdth\" 151} => \"\\\"slnt\\\" -10, \\\"wdth\\\" 151\".
+   Returns nil for nil/empty/non-map input (so callers can guard with `some?`)."
+  [settings]
+  (when (and (map? settings) (seq settings))
+    (->> settings
+         (map (fn [[tag value]] (str "\"" tag "\" " value)))
+         (str/join ", "))))
+
 (defn generate-text-styles
   ([shape data]
    (generate-text-styles shape data nil))
@@ -152,6 +162,10 @@
        (-> (obj/set! "fontFamily" font-family)
            (obj/set! "fontStyle" font-style)
            (obj/set! "fontWeight" font-weight))
+
+       (some? (variation-settings->css (:font-variation-settings data)))
+       (obj/set! "fontVariationSettings"
+                 (variation-settings->css (:font-variation-settings data)))
 
        (= grow-type :auto-width)
        (obj/set! "whiteSpace" "pre")))))

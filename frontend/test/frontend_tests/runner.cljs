@@ -29,6 +29,7 @@
    [frontend-tests.plugins.tokens-test]
    [frontend-tests.plugins.utils-test]
    [frontend-tests.svg-fills-test]
+   [frontend-tests.text-styles-test]
    [frontend-tests.tokens.import-export-test]
    [frontend-tests.tokens.logic.token-actions-test]
    [frontend-tests.tokens.logic.token-data-test]
@@ -77,6 +78,7 @@
     frontend-tests.plugins.tokens-test
     frontend-tests.plugins.utils-test
     frontend-tests.svg-fills-test
+    frontend-tests.text-styles-test
     frontend-tests.tokens.import-export-test
     frontend-tests.tokens.logic.token-actions-test
     frontend-tests.tokens.logic.token-data-test
