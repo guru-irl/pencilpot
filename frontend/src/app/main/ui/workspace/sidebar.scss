@@ -25,6 +25,14 @@
   }
 }
 
+// Pencilpot stacks the file name into two lines (title + save-status), which
+// needs a taller header than the stock single-row 52px grid track — otherwise
+// the status row overflows the header and overlaps the tabs below. Scoped to
+// pencilpot via :has(.file-name-pp) so the stock 52px header is untouched.
+.left-settings-bar:has(.file-name-pp) {
+  grid-template-rows: #{deprecated.$s-64} 1fr;
+}
+
 .layers-tab {
   padding-top: deprecated.$s-4;
   overflow-x: hidden;

@@ -13,6 +13,14 @@
   min-height: deprecated.$s-52;
 }
 
+// Pencilpot: the file name stacks into two lines (title + save-status). Top-
+// align the header so the title sits at the top (no dead space above it) and
+// the status row stays within the taller header grid-row instead of being
+// pushed down into the tabs. Scoped via :has so the stock header is untouched.
+.workspace-header-left:has(.file-name-pp) {
+  align-items: flex-start;
+}
+
 .main-icon {
   @include deprecated.flex-center;
 
@@ -64,6 +72,13 @@
   align-items: flex-start;
   height: auto;
   overflow: visible;
+}
+
+// Pencilpot has no project layer above the file, so the stock empty .project-name
+// row is just dead space that pushes the stacked title+status down into the tabs.
+// Hide it so the file name starts at the top of the header.
+.project-tree:has(.file-name-pp) .project-name {
+  display: none;
 }
 
 .file-name-label {

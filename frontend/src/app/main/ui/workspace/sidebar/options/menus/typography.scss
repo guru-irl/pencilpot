@@ -323,7 +323,7 @@
   @extend %input-element;
   @include t.use-typography("body-small");
 
-  gap: var(--sp-xs);
+  gap: var(--sp-s);
   padding-inline-start: var(--sp-s);
   padding-inline-end: var(--sp-s);
 }
@@ -338,6 +338,7 @@
 .variation-axis-input {
   flex-grow: 1;
   min-inline-size: 0;
+  text-align: right;
 }
 
 .font-size-select {
