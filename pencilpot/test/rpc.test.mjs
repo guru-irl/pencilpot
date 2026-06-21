@@ -138,6 +138,24 @@ test("rename-file updates working-copy manifest :name and marks dirty", async ()
   assert.equal(status().dirty, true, "design marked dirty after rename");
 });
 
+test("rename-file accepts the transit OBJECT body shape rp/cmd! actually sends", async () => {
+  // REGRESSION: the live SPA's (rp/cmd! :rename-file {:id :name}) encodes the
+  // params as a transit JSON *object* — {"~:id":"~u..","~:name":".."} — NOT the
+  // map-literal array form ["^ ","~:id",..,"~:name",..].  An earlier extractor
+  // only handled the array form, so the real rename silently no-op'd on disk
+  // (caught by the e2e verify harness, missed by array-only unit tests).
+  const { dir } = seedDir();
+  initWorktree(dir);
+  const body = '{"~:id":"~u0398e5fc-95c9-80d6-8008-29088f3ee53a","~:name":"Object Form Name"}';
+  const req = mockReq({ url: "/api/main/methods/rename-file", body });
+  const res = mockRes();
+  await handleRpc(req, res, { design: dir });
+
+  assert.equal(res.statusCode, 200, "rename-file returns 200");
+  assert.match(getStore(dir).manifest, /:name\s+"Object Form Name"/, "manifest :name updated from object-form body");
+  assert.equal(status().dirty, true, "design marked dirty after rename");
+});
+
 test("rename-file does not interpret $-substitution in the new name", async () => {
   const { dir } = seedDir();
   initWorktree(dir);

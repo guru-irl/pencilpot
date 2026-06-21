@@ -27,11 +27,20 @@ function sessionFor(dir) {
  * This is a lightweight raw extraction — values are NOT fully transit-decoded.
  */
 function transitGet(transitStr, keyword) {
-  const arr = JSON.parse(transitStr);
-  if (!Array.isArray(arr) || arr[0] !== "^ ") return undefined;
+  const parsed = JSON.parse(transitStr);
   const needle = `~:${keyword}`;
-  for (let i = 1; i < arr.length - 1; i += 2) {
-    if (arr[i] === needle) return arr[i + 1];
+  // Transit map literal form: ["^ ", "~:k1", v1, "~:k2", v2, ...]
+  if (Array.isArray(parsed)) {
+    if (parsed[0] !== "^ ") return undefined;
+    for (let i = 1; i < parsed.length - 1; i += 2) {
+      if (parsed[i] === needle) return parsed[i + 1];
+    }
+    return undefined;
+  }
+  // Transit object form: {"~:k1": v1, "~:k2": v2}  (how rp/cmd! encodes a small
+  // params map over the wire, e.g. {"~:id":"~u..","~:name":"New"}).
+  if (parsed && typeof parsed === "object") {
+    return Object.prototype.hasOwnProperty.call(parsed, needle) ? parsed[needle] : undefined;
   }
   return undefined;
 }
