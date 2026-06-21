@@ -4,6 +4,7 @@ import path from "node:path";
 import { attachWsStub } from "./proxy.mjs";
 import { handleRpc } from "./rpc.mjs";
 import { serveStatic } from "./static.mjs";
+import { resolveMediaAsset } from "./media.mjs";
 import { resolveProject } from "../store/project.mjs";
 import { readFonts } from "../store/fonts.mjs";
 import { handleGfontsCSS, handleGfontsFont } from "./gfonts.mjs";
@@ -118,6 +119,31 @@ const server = http.createServer(async (req, res) => {
       // Unknown file-id — fall through to 404
       res.writeHead(404);
       res.end("font not found");
+      return;
+    }
+
+    // Image media route: GET /assets/by-file-media-id/<id> (+ /<id>/thumbnail)
+    // The canvas requests image fills here (frontend resolve-file-media).  Media is
+    // stored under <design>/media/<file-media-id>.<ext> (Option A).  Checked BEFORE
+    // serveStatic so an unknown id 404s instead of falling through to the SPA index.
+    if (req.method === "GET" && req.url.startsWith("/assets/by-file-media-id/")) {
+      let rest = decodeURIComponent(req.url.split("?")[0].replace("/assets/by-file-media-id/", ""));
+      let thumbnail = false;
+      if (rest.endsWith("/thumbnail")) {
+        thumbnail = true;
+        rest = rest.slice(0, -"/thumbnail".length);
+      }
+      const asset = resolveMediaAsset(CONFIG.design, rest, { thumbnail });
+      if (asset && fs.existsSync(asset.filePath)) {
+        res.writeHead(200, {
+          "content-type": asset.contentType,
+          "cache-control": "public, max-age=31536000, immutable",
+        });
+        fs.createReadStream(asset.filePath).pipe(res);
+        return;
+      }
+      res.writeHead(404);
+      res.end("media not found");
       return;
     }
 
