@@ -180,7 +180,7 @@ export function getLiveWatcher() {
 
 /**
  * Broadcast the design's unsaved/saved status to every connected SSE client.
- * The injected save-manager script (frontend.mjs) listens for these `status`
+ * The native save client (app.main.data.pencilpot) listens for these `status`
  * events to drive the dirty indicator, Ctrl/Cmd+S handling and the unload guard.
  */
 export function broadcastStatus(dirty, revn) {
