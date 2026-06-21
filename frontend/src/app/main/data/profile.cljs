@@ -287,18 +287,14 @@
     (update [_ state]
       (update-in state [:profile :props] merge props))
 
-    ;; TODO: for the release 1.13 we should skip fetching profile and just use
-    ;; the response value of update-profile-props RPC call
-    ;; FIXME
+    ;; pencilpot: no profile backend. Persist nothing and do NOT refresh-profile
+    ;; (that chained get-profile). Keep only the local feature recompute when the
+    ;; renderer prop changes.
     ptk/WatchEvent
     (watch [_ _ _]
-      (let [refresh-profile (->> (rp/cmd! :update-profile-props {:props props})
-                                 (rx/map (constantly (refresh-profile))))
-            recompute       (when (contains? props :renderer)
-                              (rx/of (features/recompute-features)))]
-        (if recompute
-          (rx/concat recompute refresh-profile)
-          refresh-profile)))))
+      (if (contains? props :renderer)
+        (rx/of (features/recompute-features))
+        (rx/empty)))))
 
 (defn mark-onboarding-as-viewed
   ([] (mark-onboarding-as-viewed nil))
