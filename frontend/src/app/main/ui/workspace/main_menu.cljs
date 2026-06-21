@@ -19,6 +19,7 @@
    [app.main.data.exports.files :as fexp]
    [app.main.data.modal :as modal]
    [app.main.data.notifications :as ntf]
+   [app.main.data.pencilpot :as pencilpot]
    [app.main.data.plugins :as dp]
    [app.main.data.profile :as du]
    [app.main.data.shortcuts :as scd]
@@ -663,11 +664,54 @@
          (mf/deps on-export-frames)
          (fn [event]
            (when (kbd/enter? event)
-             (on-export-frames event))))]
+             (on-export-frames event))))
+
+        ;; pencilpot: native save + rename entries (filesystem mode only).
+        pp-enabled? (pencilpot/enabled?)
+
+        on-pp-save
+        (mf/use-fn
+         (fn [_]
+           (pencilpot/save!)))
+
+        on-pp-save-key-down
+        (mf/use-fn
+         (mf/deps on-pp-save)
+         (fn [event]
+           (when (kbd/enter? event)
+             (on-pp-save event))))
+
+        on-pp-rename
+        (mf/use-fn
+         (fn [_]
+           (pencilpot/request-rename!)))
+
+        on-pp-rename-key-down
+        (mf/use-fn
+         (mf/deps on-pp-rename)
+         (fn [event]
+           (when (kbd/enter? event)
+             (on-pp-rename event))))]
 
     [:> dropdown-menu* {:show true
                         :class (stl/css :base-menu :sub-menu :pos-1)
                         :on-close on-close}
+
+     (when ^boolean pp-enabled?
+       [:*
+        [:> dropdown-menu-item* {:class (stl/css :base-menu-item :submenu-item)
+                                 :on-click    on-pp-save
+                                 :on-key-down on-pp-save-key-down
+                                 :id          "file-menu-pencilpot-save"}
+         [:span {:class (stl/css :item-name)} "Save"]]
+
+        [:> dropdown-menu-item* {:class (stl/css :base-menu-item :submenu-item)
+                                 :on-click    on-pp-rename
+                                 :on-key-down on-pp-rename-key-down
+                                 :id          "file-menu-pencilpot-rename"}
+         [:span {:class (stl/css :item-name)} "Rename"]]
+
+        [:div {:class (stl/css :separator)}]])
 
      (if ^boolean shared?
        (when can-edit
