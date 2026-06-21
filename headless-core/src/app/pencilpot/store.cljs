@@ -113,7 +113,18 @@
   (cond
     (gmt/matrix? x) (matrix->tagged-literal x)
     (gpt/point? x)  (point->tagged-literal x)
-    (grc/rect? x)   (rect->tagged-literal x)
+    (grc/rect? x)   (let [ext (apply dissoc (into {} x) [:x :y :width :height :x1 :y1 :x2 :y2])]
+                      (if (empty? ext)
+                        ;; Pure geometry rect (selrect, points bbox, …): compact literal.
+                        (rect->tagged-literal x)
+                        ;; A Rect carrying extension keys — text :position-data entries are
+                        ;; Rect records with :text/:fills/:font-* assoc'd on. The compact
+                        ;; #penpot/rect literal only emits the 8 geometry fields and would
+                        ;; DROP that text data (-> blank text on reload). Emit the whole
+                        ;; record as a plain map so every key survives (matches the
+                        ;; plain-map form the import path produces).
+                        (into (sorted-map-by kcmp)
+                              (map (fn [[k v]] [k (canon v)]) (into {} x)))))
     (map? x)        (into (sorted-map-by kcmp)
                           (map (fn [[k v]] [k (canon v)]) x))
     (set? x)        (into (sorted-set-by kcmp)

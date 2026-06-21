@@ -9,6 +9,7 @@
    {:penpot
     {:exports {buildAddBoardChange app.headless.core/build-add-board-change
                buildAddBoardBody   app.headless.core/build-add-board-body
+               buildSetPositionDataBody app.headless.core/build-set-position-data-body
                createSession       app.headless.session/create-session
                importBinfileV3     app.pencilpot.import/import-binfile-v3}}}
    :js-options {:entry-keys ["module" "browser" "main"]

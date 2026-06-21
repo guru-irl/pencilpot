@@ -6,6 +6,7 @@
    [app.common.uuid :as uuid]
    [app.common.geom.matrix]
    [app.common.geom.point]
+   [app.common.geom.rect :as grc]
    [clojure.walk :as walk]))
 
 ;; `clj->js` does not know how to convert cljs.core/UUID records, so they would
@@ -53,4 +54,33 @@
                 :vern vern
                 :features (set features)
                 :changes redo}]
+    (t/encode-str params)))
+
+(defn ^:export build-set-position-data-body
+  "Test helper: build an update-file body that sets :position-data on a shape to
+  a vector of Rect records carrying text extension keys (:text/:fills/:font-*),
+  exactly as the SPA sends them over transit (each entry is a Rect record, so it
+  transit-encodes with the ~#rect tag). Used to regression-guard the
+  serialize-store path, which must NOT drop those extension keys (doing so
+  collapses position-data to a bare #penpot/rect and blanks the text)."
+  [args-json]
+  (let [{:keys [fileId pageId shapeId text fontFamily fillColor]}
+        (js->clj (js/JSON.parse args-json) :keywordize-keys true)
+        entry  (-> (grc/make-rect 10 20 30 40)
+                   (assoc :text (or text "HELLO WORLD")
+                          :fills [{:fill-color (or fillColor "#123456") :fill-opacity 1}]
+                          :font-family (or fontFamily "\"Google Sans Flex\"")
+                          :font-size "16px"
+                          :font-weight "400"
+                          :font-variation-settings "\"wdth\" 75"
+                          :direction "ltr"))
+        change {:type :mod-obj
+                :id (uuid/uuid shapeId)
+                :page-id (uuid/uuid pageId)
+                :operations [{:type :set
+                              :attr :position-data
+                              :val [entry]
+                              :ignore-geometry false
+                              :ignore-touched false}]}
+        params {:id (uuid/uuid fileId) :changes [change]}]
     (t/encode-str params)))

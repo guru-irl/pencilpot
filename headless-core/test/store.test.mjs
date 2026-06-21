@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createSession } from "../target/headless/penpot.js";
+import { createSession, buildSetPositionDataBody } from "../target/headless/penpot.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -109,6 +109,51 @@ test("serializeStore preserves Matrix/Point/Rect geometry types (NaN-rendering r
     s.serializeStore(),
     s.serializeStore(),
     "geometry types don't break determinism (serialize twice = byte-identical)"
+  );
+});
+
+test("text :position-data Rect entries keep their text keys through serialize -> load (blank-text regression)", () => {
+  // The SPA sends text :position-data as a vector of Rect RECORDS that carry
+  // text extension keys (:text/:fills/:font-*) assoc'd onto the geometry. The
+  // serialize-store EDN emitter must NOT collapse such a Rect to the compact
+  // #penpot/rect "x,y,.." literal (that drops every extension key -> the canvas
+  // text renders BLANK after a save+reopen). It must emit the whole record as a
+  // plain map instead. This guards that path end-to-end via applyTransitUpdate
+  // (the only way to land real ~#rect-tagged position-data in the store).
+  const s = createSession(JSON.stringify({ empty: true }));
+  const b = s.addBoard(JSON.stringify({ x: 0, y: 0, width: 200, height: 150, name: "Board" }));
+  const textId = s.addText(JSON.stringify({ x: 10, y: 10, characters: "PILL SPEC", parentId: b }));
+  s.closeBoard();
+
+  // Page id: first (only) page in the serialized store.
+  const pageId = Object.keys(JSON.parse(s.serializeStore()).pages)[0];
+
+  // Build + apply a real transit update-file body that sets :position-data to a
+  // Rect record carrying text keys (exactly the SPA wire shape).
+  const body = buildSetPositionDataBody(JSON.stringify({
+    fileId: "00000000-0000-0000-0000-000000000000",
+    pageId, shapeId: textId,
+    text: "PILL SPEC", fontFamily: "\"Google Sans Flex\"", fillColor: "#0e0e0e",
+  }));
+  s.applyTransitUpdate(body);
+
+  const pageEdn = Object.values(JSON.parse(s.serializeStore()).pages)[0];
+
+  // The position-data must NOT be a bare rect literal, and the text must survive.
+  assert.ok(
+    !/:position-data\s*\[\s*#penpot\/rect/.test(pageEdn),
+    "position-data must NOT serialize as a bare [#penpot/rect ...] (would drop text)"
+  );
+  assert.ok(pageEdn.includes('"PILL SPEC"'), "position-data keeps its :text");
+  assert.ok(pageEdn.includes("#0e0e0e"), "position-data keeps its :fills color");
+  assert.ok(pageEdn.includes("Google Sans Flex"), "position-data keeps its :font-family");
+
+  // And it survives a full EDN round-trip (load -> re-serialize, byte-identical).
+  const parts = JSON.parse(s.serializeStore());
+  const s2 = createSession(JSON.stringify({ fromStore: parts }));
+  assert.equal(
+    s2.serializeStore(), s.serializeStore(),
+    "position-data with text keys round-trips losslessly (byte-identical re-serialization)"
   );
 });
 
