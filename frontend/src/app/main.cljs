@@ -14,6 +14,7 @@
    [app.common.uuid :as uuid]
    [app.config :as cf]
    [app.main.data.event :as ev]
+   [app.main.data.pencilpot :as pencilpot]
    [app.main.errors]
    [app.main.features :as feat]
    [app.main.rasterizer :as thr]
@@ -128,7 +129,8 @@
 
       (init-ui)
       (st/emit! (plugins/initialize)
-                (initialize)))))
+                (initialize))
+      (pencilpot/start-client!))))
 
 (defn ^:export reinit
   ([]
