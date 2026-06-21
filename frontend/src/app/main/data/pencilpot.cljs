@@ -30,6 +30,21 @@
   []
   (swap! rename-request inc))
 
+(defn- reconcile-status!
+  "Clear :saving and re-sync :dirty from the server's AUTHORITATIVE status.
+   Run after every save outcome (ok / not-ok / network error / timeout) so the
+   indicator converges to disk truth: a concurrent update-file that staged a
+   late edit mid-save had its status echo suppressed by on-status while :saving
+   was set, and a save whose write reached disk but whose response failed left
+   :dirty stale.  Clearing :saving FIRST lets this GET (and any later SSE echo)
+   apply again."
+  []
+  (swap! status assoc :saving false)
+  (-> (js/fetch "/pencilpot/status")
+      (.then (fn [r] (.json r)))
+      (.then (fn [s] (swap! status assoc :dirty (boolean (obj/get s "dirty")))))
+      (.catch (fn [_] nil))))
+
 (defn save!
   "Flush the working copy to disk via POST /pencilpot/save. No-op unless the
    document is dirty and a save is not already in flight."
@@ -37,26 +52,24 @@
   (let [{:keys [dirty saving]} @status]
     (when (and dirty (not saving))
       (swap! status assoc :saving true)
-      (-> (js/fetch "/pencilpot/save" #js {:method "POST"})
-          (.then  (fn [res]
-                    (if (.-ok res)
-                      ;; Clear the in-flight flag FIRST, then reconcile :dirty
-                      ;; from the server's authoritative status.  If a
-                      ;; concurrent update-file staged a late edit during this
-                      ;; save, its dirty=true echo was suppressed by on-status
-                      ;; while :saving was set; this GET runs after :saving
-                      ;; clears and captures that edit instead of forcing a
-                      ;; stale "Saved" (which would let beforeunload drop it).
-                      (do (swap! status assoc :saving false :dirty false)
-                          (-> (js/fetch "/pencilpot/status")
-                              (.then (fn [r] (.json r)))
-                              (.then (fn [s] (swap! status assoc :dirty (boolean (obj/get s "dirty")))))
-                              (.catch (fn [_] nil))))
-                      (do (swap! status assoc :saving false)
-                          (js/alert "pencilpot: save failed — check the runtime log.")))))
-          (.catch (fn [_]
-                    (swap! status assoc :saving false)
-                    (js/alert "pencilpot: save failed — check the runtime log.")))))))
+      ;; Abort the request if it never settles so :saving can't pin "Saving…"
+      ;; forever (belt-and-suspenders for a localhost runtime).
+      (let [ctrl (js/AbortController.)
+            tid  (js/setTimeout #(.abort ctrl) 15000)]
+        (-> (js/fetch "/pencilpot/save" #js {:method "POST" :signal (.-signal ctrl)})
+            (.then  (fn [res]
+                      (js/clearTimeout tid)
+                      ;; Optimistically clear :dirty on the happy path to avoid
+                      ;; an "Unsaved" flash before reconcile resolves; on failure
+                      ;; leave :dirty and let reconcile decide from server truth.
+                      (if (.-ok res)
+                        (swap! status assoc :dirty false)
+                        (js/alert "pencilpot: save failed — check the runtime log."))
+                      (reconcile-status!)))
+            (.catch (fn [_]
+                      (js/clearTimeout tid)
+                      (js/alert "pencilpot: save failed — check the runtime log.")
+                      (reconcile-status!))))))))
 
 (defn- on-status
   [ev]
