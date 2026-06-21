@@ -8,7 +8,7 @@
  * No external Penpot backend, no network, no penpot-hl.
  *
  * @param {string} filePath  Absolute path to the .penpot ZIP file
- * @returns {Promise<{parts: object, mediaFiles: {id: string, srcPath: string, ext: string}[]}>}
+ * @returns {Promise<{parts: object, mediaFiles: {id: string, srcPath: string, ext: string, width: number, height: number, mtype: string, name: string, thumbnailSrcPath?: string, thumbnailExt?: string}[]}>}
  */
 
 import fs from "node:fs";
@@ -104,6 +104,7 @@ function groupEntries(jsonEntries, binaryEntries) {
         mediaIds: [],
         _primaryIds: [],   // storage-object ids that are primary media (must exist)
         _thumbnailIds: [], // storage-object ids that are thumbnails (may be absent)
+        _descriptors: [],  // full media descriptors: { fileMediaId, mediaId, thumbnailId, width, height, mtype, name }
       };
     }
     return result.files[fileId];
@@ -198,6 +199,8 @@ function groupEntries(jsonEntries, binaryEntries) {
         fileSlot.mediaIds.push(mid);
       }
       // Track the storage-object ids (mediaId = primary, thumbnailId = optional)
+      // AND retain the full descriptor so media can be keyed by the file-media-id
+      // (`mid`) it is referenced by, carrying width/height/mtype/name metadata.
       try {
         const desc = JSON.parse(readText(absPath));
         if (desc.mediaId) {
@@ -206,6 +209,15 @@ function groupEntries(jsonEntries, binaryEntries) {
         if (desc.thumbnailId) {
           fileSlot._thumbnailIds.push(desc.thumbnailId);
         }
+        fileSlot._descriptors.push({
+          fileMediaId: mid,
+          mediaId: desc.mediaId ?? null,
+          thumbnailId: desc.thumbnailId ?? null,
+          width: desc.width ?? null,
+          height: desc.height ?? null,
+          mtype: desc.mtype ?? null,
+          name: desc.name ?? null,
+        });
       } catch {}
       continue;
     }
@@ -265,7 +277,7 @@ function sortPagesByIndex(pages) {
  * Natively convert a .penpot file into pencilpot store parts.
  *
  * @param {string} filePath Absolute path to the .penpot ZIP
- * @returns {{ parts: object, mediaFiles: {id: string, srcPath: string, ext: string}[] }}
+ * @returns {{ parts: object, mediaFiles: {id: string, srcPath: string, ext: string, width: number, height: number, mtype: string, name: string, thumbnailSrcPath?: string, thumbnailExt?: string}[] }}
  */
 export async function importPenpot(filePath) {
   // 1. Unzip to a temp dir
@@ -290,49 +302,59 @@ export async function importPenpot(filePath) {
     const resultJson = importBinfileV3(JSON.stringify(grouped));
     const result = JSON.parse(resultJson);
 
-    // Build the set of storage-object IDs referenced by media descriptors
-    // (media descriptors link file-media-object-id → storage-object mediaId/thumbnailId)
-    // Separate primary mediaIds from thumbnailIds so we can warn only on missing primaries.
-    const primaryMediaIds = new Set(
-      Object.values(grouped.files).flatMap((f) => f._primaryIds || [])
-    );
-    const thumbnailIds = new Set(
-      Object.values(grouped.files).flatMap((f) => f._thumbnailIds || [])
-    );
-    const allReferencedIds = new Set([...primaryMediaIds, ...thumbnailIds]);
+    // Media descriptors link a file-media-object-id (what `:fill-image {:id …}`
+    // references) to storage-object ids (the actual binaries: `mediaId` primary,
+    // `thumbnailId` optional).  The engine + canvas resolve images BY FILE-MEDIA-ID
+    // (GET /assets/by-file-media-id/<id>), so media must be keyed by the
+    // file-media-id on disk — not by the storage-object id the binary is named with.
+    const descriptors = Object.values(grouped.files).flatMap((f) => f._descriptors || []);
 
-    // For each referenced id, GLOB objects/<id>.* in the temp dir to find the
-    // actual file (which may be .png, .jpg, or any extension).  Skip thumbnail
-    // ids that weren't exported (silently); warn only for missing primary mediaIds.
-    const resolvedMedia = [];
+    // Build storage-object-id → { srcPath, ext } once by globbing objects/<id>.<ext>.
     const objectsDir = path.join(tmpDir, "objects");
     const hasObjectsDir = fs.existsSync(objectsDir);
-
-    for (const id of allReferencedIds) {
-      let found = false;
-      if (hasObjectsDir) {
-        for (const entry of fs.readdirSync(objectsDir)) {
-          // entry format: <id>.<ext>  (no dots in the id part)
-          const dotIdx = entry.lastIndexOf(".");
-          if (dotIdx === -1) continue;
-          const entryId = entry.slice(0, dotIdx);
-          const entryExt = entry.slice(dotIdx + 1);
-          if (entryId === id) {
-            resolvedMedia.push({ id, srcPath: path.join(objectsDir, entry), ext: entryExt });
-            found = true;
-            break;
-          }
-        }
+    const storageById = new Map();
+    if (hasObjectsDir) {
+      for (const entry of fs.readdirSync(objectsDir)) {
+        const dotIdx = entry.lastIndexOf(".");
+        if (dotIdx === -1) continue;
+        const sid = entry.slice(0, dotIdx);
+        const ext = entry.slice(dotIdx + 1);
+        storageById.set(sid, { srcPath: path.join(objectsDir, entry), ext });
       }
-      if (!found && primaryMediaIds.has(id)) {
-        // Only warn for primary media that genuinely has no binary in the zip.
-        console.warn(`  warning: primary media object ${id} not found in zip (skipping)`);
-      }
-      // Missing thumbnails → silent skip (do nothing).
     }
 
-    // If no media descriptors at all, fall back to all binaries found.
-    const effectiveMedia = allReferencedIds.size > 0 ? resolvedMedia : mediaFiles;
+    // Resolve each descriptor to a media entry keyed by its file-media-id,
+    // carrying metadata and (when present) the thumbnail binary.
+    const resolvedMedia = [];
+    for (const d of descriptors) {
+      const primary = d.mediaId ? storageById.get(d.mediaId) : null;
+      if (!primary) {
+        // Primary binary genuinely absent from the zip — warn and skip.
+        console.warn(`  warning: primary media object ${d.mediaId} not found in zip (skipping)`);
+        continue;
+      }
+      const entry = {
+        id: d.fileMediaId,
+        srcPath: primary.srcPath,
+        ext: primary.ext,
+        width: d.width,
+        height: d.height,
+        mtype: d.mtype,
+        name: d.name,
+      };
+      const thumb = d.thumbnailId ? storageById.get(d.thumbnailId) : null;
+      if (thumb) {
+        // Thumbnail binary present — carry it so the caller can write
+        // <file-media-id>.thumbnail.<ext>.  Missing thumbnails are a silent skip.
+        entry.thumbnailSrcPath = thumb.srcPath;
+        entry.thumbnailExt = thumb.ext;
+      }
+      resolvedMedia.push(entry);
+    }
+
+    // If no media descriptors at all, fall back to all binaries found,
+    // keyed by their own id (non-descriptor imports must not regress).
+    const effectiveMedia = descriptors.length > 0 ? resolvedMedia : mediaFiles;
 
     // Copy resolved media to a stable temp location BEFORE cleaning up tmpDir,
     // so that the caller can still copy from srcPath after this function returns.
@@ -341,7 +363,23 @@ export async function importPenpot(filePath) {
     for (const mf of effectiveMedia) {
       const dest = path.join(stableDir, `${mf.id}.${mf.ext}`);
       fs.copyFileSync(mf.srcPath, dest);
-      stableMedia.push({ id: mf.id, srcPath: dest, ext: mf.ext, _stableDir: stableDir });
+      const out = {
+        id: mf.id,
+        srcPath: dest,
+        ext: mf.ext,
+        width: mf.width ?? null,
+        height: mf.height ?? null,
+        mtype: mf.mtype ?? null,
+        name: mf.name ?? null,
+        _stableDir: stableDir,
+      };
+      if (mf.thumbnailSrcPath) {
+        const thumbDest = path.join(stableDir, `${mf.id}.thumbnail.${mf.thumbnailExt}`);
+        fs.copyFileSync(mf.thumbnailSrcPath, thumbDest);
+        out.thumbnailSrcPath = thumbDest;
+        out.thumbnailExt = mf.thumbnailExt;
+      }
+      stableMedia.push(out);
     }
 
     return {

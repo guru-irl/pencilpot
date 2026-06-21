@@ -290,6 +290,7 @@ async function main() {
       path.join(HERE, "test/library.test.mjs"),
       path.join(HERE, "test/cli.test.mjs"),
       path.join(HERE, "test/fonts.test.mjs"),
+      path.join(HERE, "test/import-media.test.mjs"),
       path.join(HERE, "test/terminal.test.mjs"),
     ];
     console.log(col("cyan", col("bold", "\n▶ tier: integration")));

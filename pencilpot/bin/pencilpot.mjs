@@ -694,10 +694,20 @@ async function cmdImport(positional, flags) {
     if (mediaFiles.length > 0) {
       const mediaDir = path.join(designDir, "media");
       fs.mkdirSync(mediaDir, { recursive: true });
-      for (const { id, srcPath, ext } of mediaFiles) {
+      for (const mf of mediaFiles) {
+        const { id, srcPath, ext, width, height, mtype, name, thumbnailSrcPath, thumbnailExt } = mf;
         const dest = path.join(mediaDir, `${id}.${ext}`);
         try {
           fs.copyFileSync(srcPath, dest);
+          // Sidecar metadata used by the runtime media route + media-object responses.
+          fs.writeFileSync(
+            path.join(mediaDir, `${id}.json`),
+            JSON.stringify({ width: width ?? null, height: height ?? null, mtype: mtype ?? null, name: name ?? null }),
+          );
+          // Optional thumbnail binary, keyed by the same file-media-id.
+          if (thumbnailSrcPath) {
+            fs.copyFileSync(thumbnailSrcPath, path.join(mediaDir, `${id}.thumbnail.${thumbnailExt}`));
+          }
         } catch (e) {
           console.warn(`  warning: could not copy media ${id}.${ext}: ${e.message}`);
         }
