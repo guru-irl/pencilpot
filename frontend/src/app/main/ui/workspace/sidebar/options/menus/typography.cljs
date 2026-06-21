@@ -461,6 +461,26 @@
   [{:keys [name tag]}]
   (or (when-not (str/blank? name) name) tag))
 
+(def ^:private axis-descriptions
+  "Friendly names for the standard registered OpenType axes."
+  {"wght" "Weight"
+   "wdth" "Width"
+   "opsz" "Optical size"
+   "ital" "Italic"
+   "slnt" "Slant"
+   "GRAD" "Grade"
+   "ROND" "Roundness"})
+
+(defn- axis-tooltip
+  "Human description + tag + numeric range for a variable-font axis,
+  e.g. `Width (wdth): 50\u2013151, default 100`. Degrades to `Name (tag)`
+  when min/max/default are missing."
+  [{:keys [tag min max default] :as axis}]
+  (let [name (or (get axis-descriptions tag) (axis-label axis))]
+    (str name " (" tag ")"
+         (when (and (some? min) (some? max)) (str ": " min "\u2013" max))
+         (when (some? default) (str ", default " default)))))
+
 (defn- axis-current-value
   "Resolve the current value for a given axis from the shape's
   `:font-variation-settings`, falling back to the axis default and -- for the
@@ -513,7 +533,7 @@
           (let [value (axis-current-value axis variation-settings font-weight)]
             [:div {:class (stl/css :variation-axis)
                    :key (dm/str "axis-" tag)
-                   :title (axis-label axis)}
+                   :title (axis-tooltip axis)}
              [:span {:class (stl/css :variation-axis-label)} tag]
              [:> numeric-input*
               {:min min
