@@ -16,14 +16,26 @@
 // shared libraries, read-only) always reads straight from disk.
 
 import { readDesign, writeDesign } from "../store/index.mjs";
-import { stripPositionData } from "../store/edn.mjs";
+import { stripPositionData, normalizeEdnWhitespace, stripRevn } from "../store/edn.mjs";
 import crypto from "node:crypto";
 
 /**
- * Stable content signature of a serialized working copy.  Order-independent
- * over the `pages`/`components` maps so that two stores with the same content
- * but different key ordering hash identically.  `:position-data` is stripped so
- * derived text-layout cache never registers as a user edit.
+ * Stable CONTENT signature of a serialized working copy.  Order-independent
+ * over the `pages`/`components` maps so two stores with the same content but
+ * different key ordering hash identically.  Each component is canonicalized to
+ * its user content before hashing:
+ *
+ *   - `:position-data` is stripped: derived text-layout cache (recomputed on
+ *     every render), never a user edit.
+ *   - manifest `:revn` is stripped: a monotonic counter bumped on every
+ *     update-file (incl. the no-op update-file the SPA emits on OPEN), so it
+ *     reflects activity, not content.
+ *   - inter-token whitespace is normalized: the saved baseline is read as raw
+ *     on-disk EDN text while a staged copy is freshly serialized by the engine,
+ *     and those two serializers differ in insignificant whitespace (e.g. the
+ *     blank-line residue writeDesign leaves when stripping :position-data).
+ *     Without this, identical content hashes differently and a design opens
+ *     spuriously "dirty".
  *
  * `media` is intentionally EXCLUDED: media binaries are disk-managed out-of-band
  * (written directly by the upload RPC / import, never staged through the working
@@ -36,10 +48,11 @@ import crypto from "node:crypto";
  */
 function computeSig(parts) {
   if (!parts) return "";
+  const canon = (edn) => normalizeEdnWhitespace(stripPositionData(edn || ""));
   const norm = {
-    manifest: parts.manifest || "",
-    pages: Object.keys(parts.pages || {}).sort().map((k) => [k, stripPositionData(parts.pages[k])]),
-    components: Object.keys(parts.components || {}).sort().map((k) => [k, stripPositionData(parts.components[k])]),
+    manifest: normalizeEdnWhitespace(stripRevn(parts.manifest || "")),
+    pages: Object.keys(parts.pages || {}).sort().map((k) => [k, canon(parts.pages[k])]),
+    components: Object.keys(parts.components || {}).sort().map((k) => [k, canon(parts.components[k])]),
   };
   return crypto.createHash("sha1").update(JSON.stringify(norm)).digest("hex");
 }

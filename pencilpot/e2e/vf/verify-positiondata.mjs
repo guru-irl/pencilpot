@@ -129,6 +129,15 @@ try {
   check(coldTextNodes > 0,
     `cold reopen: text repaints from stripped (zero position-data) disk (svg <text> count=${coldTextNodes})`);
 
+  // (5) cold reopen must NOT spuriously dirty.  The on-disk page carries the
+  //     blank-line residue left when Save stripped :position-data; the SPA's
+  //     no-op open update-file re-serializes it cleanly (and bumps :revn).  A
+  //     content-only dirty signature must treat that as identical — opening a
+  //     design with no user edits must stay clean.
+  await page2.waitForTimeout(1500);
+  const coldDirty = (await (await fetch(base2 + "/pencilpot/status")).json()).dirty;
+  check(coldDirty === false, `cold reopen did not spuriously dirty (dirty=${coldDirty})`);
+
   await browser2.close(); browser2 = null;
 } catch (e) {
   console.log("FAIL: harness error");

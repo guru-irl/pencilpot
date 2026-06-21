@@ -156,4 +156,63 @@ test("position-data-only change does NOT mark dirty; real edit does", () => {
     [pid]: parts.pages[pid].replace(':name "B"', ':name "RENAMED"') } };
   stage(dir, realEdit, 2);
   assert.equal(status().dirty, true, "real content edit MUST dirty");
+  initWorktree(null);
+});
+
+// ── Content-only signature: ignore :revn bumps + EDN whitespace drift ────────
+// Opening a design with NO user edits used to report "Unsaved changes": the SPA
+// sends one no-op `update-file` on open, which (1) bumps manifest :revn and
+// (2) re-serializes pages with clean whitespace, while the on-disk EDN carries
+// the blank-line residue left when writeDesign stripped :position-data.  Neither
+// is user content, so the dirty signature must ignore both.
+const BLANK_RESIDUE = '{:a 1\n      \n      :b 2}';   // disk: orphaned blank line after a stripped :position-data
+const CLEAN_PAGE    = '{:a 1\n      :b 2}';            // engine: same content, clean whitespace
+function seedRevnBaseline() {
+  const dir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "pp-wt-")), "home.penpot");
+  // baseline on disk: :revn 1 + a page with the blank-line residue
+  writeDesign(dir, { manifest: '{:name "X" :revn 1}', pages: { p1: BLANK_RESIDUE }, components: {}, media: [] });
+  return dir;
+}
+
+test("dirty-sig: a :revn-only bump (no-op open update-file) does NOT mark dirty", () => {
+  const dir = seedRevnBaseline();
+  initWorktree(dir);
+  // identical content, only :revn bumped 1 -> 2 (what the open update-file does)
+  stage(dir, { manifest: '{:name "X" :revn 2}', pages: { p1: BLANK_RESIDUE }, components: {}, media: [] }, 2);
+  assert.equal(status().dirty, false, ":revn bump alone must NOT dirty");
+  initWorktree(null);
+});
+
+test("dirty-sig: whitespace-only drift (disk blank-line residue vs clean engine output) does NOT mark dirty", () => {
+  const dir = seedRevnBaseline();
+  initWorktree(dir);
+  // engine re-serializes the same page with clean whitespace (no blank line)
+  stage(dir, { manifest: '{:name "X" :revn 1}', pages: { p1: CLEAN_PAGE }, components: {}, media: [] }, 2);
+  assert.equal(status().dirty, false, "whitespace-only formatting drift must NOT dirty");
+  initWorktree(null);
+});
+
+test("dirty-sig: the combined no-op open (revn bump + whitespace drift) does NOT mark dirty", () => {
+  const dir = seedRevnBaseline();
+  initWorktree(dir);
+  stage(dir, { manifest: '{:name "X" :revn 2}', pages: { p1: CLEAN_PAGE }, components: {}, media: [] }, 2);
+  assert.equal(status().dirty, false, "combined revn+whitespace no-op must NOT dirty");
+  initWorktree(null);
+});
+
+test("dirty-sig: a REAL content change still marks dirty (fix does not mask edits)", () => {
+  const dir = seedRevnBaseline();
+  initWorktree(dir);
+  // same whitespace shape, but :b value actually changed 2 -> 99
+  stage(dir, { manifest: '{:name "X" :revn 2}', pages: { p1: '{:a 1\n      :b 99}' }, components: {}, media: [] }, 2);
+  assert.equal(status().dirty, true, "real content edit MUST still dirty");
+  initWorktree(null);
+});
+
+test("dirty-sig: a real string-value change still marks dirty", () => {
+  const dir = seedRevnBaseline();
+  initWorktree(dir);
+  stage(dir, { manifest: '{:name "RENAMED" :revn 2}', pages: { p1: CLEAN_PAGE }, components: {}, media: [] }, 2);
+  assert.equal(status().dirty, true, "changing a real string value MUST dirty");
+  initWorktree(null);
 });
