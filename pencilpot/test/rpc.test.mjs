@@ -137,3 +137,51 @@ test("rename-file updates working-copy manifest :name and marks dirty", async ()
   assert.match(getStore(dir).manifest, /:name\s+"New Name"/, "manifest :name updated");
   assert.equal(status().dirty, true, "design marked dirty after rename");
 });
+
+test("rename-file does not interpret $-substitution in the new name", async () => {
+  const { dir } = seedDir();
+  initWorktree(dir);
+
+  // A legal file name containing `$&` must NOT be expanded by String.replace's
+  // special replacement patterns — the staged manifest must hold the EXACT name.
+  const name = "Tom $& Jerry";
+  const body = `["^ ","~:id","~u0398e5fc-95c9-80d6-8008-29088f3ee53a","~:name",${JSON.stringify(name)}]`;
+  const req = mockReq({ url: "/api/main/methods/rename-file", body });
+  const res = mockRes();
+  await handleRpc(req, res, { design: dir });
+
+  assert.equal(res.statusCode, 200, "rename-file returns 200");
+  const manifest = getStore(dir).manifest;
+  // Exact literal `:name "Tom $& Jerry"` — no injected match text.
+  assert.ok(
+    manifest.includes(`:name "Tom $& Jerry"`),
+    `manifest should hold exact :name; got: ${manifest.slice(0, 200)}`,
+  );
+  // The matched substring (`:name "..."`) must NOT have been injected inside the name.
+  assert.doesNotMatch(manifest, /Tom :name/, "no match-text injection");
+  assert.equal(status().dirty, true, "design marked dirty after rename");
+});
+
+test("rename-file persists names with embedded quote and backslash (transit)", async () => {
+  for (const name of ['Quote"Inside', "back\\slash"]) {
+    const { dir } = seedDir();
+    initWorktree(dir);
+
+    // Transit-encoded body; JSON.stringify produces the proper transit/JSON
+    // escaping for the embedded quote/backslash.
+    const body = `["^ ","~:id","~u0398e5fc-95c9-80d6-8008-29088f3ee53a","~:name",${JSON.stringify(name)}]`;
+    const req = mockReq({ url: "/api/main/methods/rename-file", body });
+    const res = mockRes();
+    await handleRpc(req, res, { design: dir });
+
+    assert.equal(res.statusCode, 200, "rename-file returns 200");
+    const manifest = getStore(dir).manifest;
+    // The full name must be persisted, EDN-escaped (EDN escapes " and \ like JSON).
+    const ednLiteral = `:name ${JSON.stringify(name)}`;
+    assert.ok(
+      manifest.includes(ednLiteral),
+      `manifest should hold full EDN-escaped :name (${ednLiteral}); got: ${manifest.slice(0, 200)}`,
+    );
+    assert.equal(status().dirty, true, "design marked dirty after rename");
+  }
+});

@@ -317,17 +317,32 @@ export async function handleRpc(req, res, cfg) {
     // rename is written to disk on the next explicit Save.
     const body = (await readBody(req)).toString("utf8");
     // Name may arrive transit-encoded ("~:name","New") or as JSON (:name "New").
-    const m = body.match(/"~:name"\s*,?\s*"([^"]*)"/) || body.match(/:name\s+"([^"]*)"/);
-    const newName = m ? m[1] : null;
+    // Prefer transitGet for the transit case: it JSON.parses and decodes the
+    // value in full, so names containing `"` or `\` are not truncated by a
+    // hand-rolled quote-delimited regex.  Fall back to the plain JSON/EDN
+    // `:name "..."` encoding when the body is not a transit map.
+    let newName = null;
+    try {
+      newName = transitGet(body, "name");
+    } catch {
+      // Body is not valid JSON (e.g. plain EDN) — fall through to the regex.
+    }
+    if (newName == null) {
+      const m = body.match(/:name\s+"([^"]*)"/);
+      newName = m ? m[1] : null;
+    }
     const store = cfg.design ? getStore(cfg.design) : null;
     if (newName != null && store) {
       // manifest.edn serializes keywords alphabetically, so the FIRST
       // `:name "..."` is the design's file name (library refs serialize as
       // {:id :path} with no nested :name before it).  Anchor to that first
       // occurrence; JSON.stringify escapes quotes/backslashes in the new name.
+      // Use a FUNCTION replacer so `$`-sequences in the name (e.g. `$&`, `$1`,
+      // `` $` ``) are written literally and never interpreted as replacement
+      // patterns by String.prototype.replace.
       store.manifest = store.manifest.replace(
         /(:name\s+)"(?:[^"\\]|\\.)*"/,
-        `$1${JSON.stringify(newName)}`,
+        (_m, p1) => p1 + JSON.stringify(newName),
       );
       stage(cfg.design, store, status().revn);
       broadcastStatus(status().dirty, status().revn);
