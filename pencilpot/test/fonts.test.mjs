@@ -211,6 +211,39 @@ test("runtime get-font-variants returns added fonts in Penpot transit shape", as
   assert.ok(hasFileId, `has at least one *-file-id key: found keys=${keys.join(",")}`);
 });
 
+// Regression (font double-prefix bug): the frontend's data/fonts.cljs `adapt-font-id`
+// ALWAYS prepends "custom-" to the :font-id it receives. So get-font-variants must
+// serve the RAW id (no leading "custom-"); serving an already-prefixed id yields a
+// doubled "custom-custom-" registry key, and text edits then bake that broken id
+// into every leaf so the font no longer resolves on reload.
+test("get-font-variants strips a leading custom- so the frontend re-prefixes to a single custom-<id>", async (t) => {
+  const systemFont = findSystemFont();
+  if (!systemFont) return t.skip("no system .ttf font found");
+
+  const dir = makeProject(tmp());
+  const { addFont } = await import("../store/fonts.mjs");
+  // Register a font whose stable fontId already carries the "custom-" prefix
+  // (this is exactly the shape imported .penpot designs produce).
+  await addFont(dir, { file: systemFont, family: "Carlito", weight: 400, style: "normal", fontId: "custom-carlito" });
+
+  const { handleRpc } = await import("../runtime/rpc.mjs");
+  let responseBody = "";
+  const res = { writeHead() {}, end(body) { responseBody = body; } };
+  const req = {
+    url: "/api/rpc/command/get-font-variants?team-id=00000000-0000-0000-0000-000000000000",
+    method: "GET",
+    headers: { accept: "application/transit+json" },
+  };
+  await handleRpc(req, res, { design: null, project: dir });
+
+  const v = JSON.parse(responseBody)[0];
+  const idx = v.indexOf("~:font-id");
+  assert.ok(idx > 0, "served variant carries ~:font-id");
+  const servedFontId = v[idx + 1];
+  assert.equal(servedFontId, "carlito", "leading custom- is stripped from the served font-id");
+  assert.ok(!/^custom-/.test(servedFontId), "served font-id must not start with custom-");
+});
+
 // ── TEST 5: GET /assets/by-id/<id> serves font binary ────────────────────────
 
 test("GET /assets/by-id/<variantId> serves the font binary with a font content-type", async (t) => {

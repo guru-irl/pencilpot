@@ -179,6 +179,14 @@ function encodeTransitLibraryList(libs) {
 export function encodeTransitFontVariants(variants) {
   const arr = variants.map((v) => {
     const { id, fontId, family, weight, style, variable, axes, instances } = v;
+    // Penpot's frontend (data/fonts.cljs `adapt-font-id`) ALWAYS prepends
+    // "custom-" to the :font-id it receives from get-font-variants, building the
+    // font-registry key the workspace edits with. So we must serve the RAW id
+    // here (matching the real Penpot backend, which stores un-prefixed ids):
+    // serving an already-"custom-"-prefixed id yields a doubled "custom-custom-"
+    // registry key, and any text edit then bakes that broken id into every leaf
+    // (font no longer resolves -> falls back on reload).
+    const rawFontId = String(fontId ?? id).replace(/^custom-/, "");
     // Penpot's custom-font @font-face builds its URL from :woff1-file-id (see
     // fonts.cljs generate-custom-font-variant-css).  We only ever have one file
     // per variant, served by /assets/by-id/<id> with the correct content-type, so
@@ -188,7 +196,7 @@ export function encodeTransitFontVariants(variants) {
     const map = [
       "^ ",
       "~:id",           id,
-      "~:font-id",      fontId ?? id,
+      "~:font-id",      rawFontId,
       "~:font-family",  family,
       "~:font-weight",  weight,
       "~:font-style",   style,
