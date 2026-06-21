@@ -41,6 +41,25 @@ test("editing one shape rewrites exactly one page file (minimal diff)", () => {
   assert.equal(changedPages.length, 1, "exactly one page .edn changed");
 });
 
+test("writeDesign strips :position-data from disk but not from the caller's parts", () => {
+  const dir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "pp-st-")), "home.penpot");
+  const parts = {
+    manifest: "{:name \"d\"}",
+    pages: { p1: '{:id 1 :position-data [#penpot/rect "1,2,3"] :name "t"}' },
+    components: { c1: '{:cid 2 :position-data [{:a [1 2]}] :k 3}' },
+    media: [],
+  };
+  writeDesign(dir, parts);
+
+  const onDisk = readDesign(dir);
+  assert.ok(!onDisk.pages.p1.includes(":position-data"), "page pd removed on disk");
+  assert.ok(!onDisk.components.c1.includes(":position-data"), "component pd removed on disk");
+  assert.ok(onDisk.pages.p1.includes(':name "t"'), "real content preserved");
+
+  // Caller's object is untouched (in-memory working copy keeps pd).
+  assert.ok(parts.pages.p1.includes(":position-data"), "caller parts not mutated");
+});
+
 import { initProject, addDesign, resolveProjectRoot, listDesigns } from "../store/project.mjs";
 
 test("initProject creates a git repo + shared/; resolveProjectRoot walks up from a nested design dir; addDesign + listDesigns work", () => {

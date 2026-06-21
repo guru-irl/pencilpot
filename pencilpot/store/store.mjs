@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { stripPositionData } from "./edn.mjs";
 
 // parts = { manifest: edn-str, pages: {id: edn}, components: {id: edn}, media: [id…] }
 export function writeDesign(dir, parts) {
@@ -7,8 +8,8 @@ export function writeDesign(dir, parts) {
   fs.mkdirSync(path.join(dir, "components"), { recursive: true });
   fs.mkdirSync(path.join(dir, "media"), { recursive: true });
   fs.writeFileSync(path.join(dir, "manifest.edn"), parts.manifest);
-  for (const [id, edn] of Object.entries(parts.pages)) fs.writeFileSync(path.join(dir, "pages", `${id}.edn`), edn);
-  for (const [id, edn] of Object.entries(parts.components)) fs.writeFileSync(path.join(dir, "components", `${id}.edn`), edn);
+  for (const [id, edn] of Object.entries(parts.pages)) fs.writeFileSync(path.join(dir, "pages", `${id}.edn`), stripPositionData(edn));
+  for (const [id, edn] of Object.entries(parts.components)) fs.writeFileSync(path.join(dir, "components", `${id}.edn`), stripPositionData(edn));
   prune(path.join(dir, "pages"), new Set(Object.keys(parts.pages).map((i) => `${i}.edn`)));
   prune(path.join(dir, "components"), new Set(Object.keys(parts.components).map((i) => `${i}.edn`)));
 }
