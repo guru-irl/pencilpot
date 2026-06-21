@@ -60,6 +60,43 @@ test("writeDesign strips :position-data from disk but not from the caller's part
   assert.ok(parts.pages.p1.includes(":position-data"), "caller parts not mutated");
 });
 
+test("readDesign().media lists primary image ids, excluding thumbnails and json sidecars", () => {
+  const dir = path.join(tmp(), "home.penpot");
+  writeDesign(dir, { manifest: '{:name "d"}', pages: {}, components: {}, media: [] });
+  const mdir = path.join(dir, "media");
+  // Two primary images (each with a sidecar), one with a thumbnail variant.
+  fs.writeFileSync(path.join(mdir, "a.png"), Buffer.from([1, 2, 3]));
+  fs.writeFileSync(path.join(mdir, "a.json"), '{"width":1,"height":1,"mtype":"image/png","name":"a"}');
+  fs.writeFileSync(path.join(mdir, "a.thumbnail.png"), Buffer.from([4, 5, 6]));
+  fs.writeFileSync(path.join(mdir, "b.jpg"), Buffer.from([7, 8, 9]));
+  fs.writeFileSync(path.join(mdir, "b.json"), '{"width":2,"height":2,"mtype":"image/jpeg","name":"b"}');
+  // A stray binary with NO sidecar must NOT be listed (e.g. a mis-keyed legacy file).
+  fs.writeFileSync(path.join(mdir, "orphan.jpg"), Buffer.from([0]));
+
+  const media = readDesign(dir).media;
+  assert.deepEqual([...media].sort(), ["a", "b"], "lists exactly the primary ids (sidecar-backed), excludes thumbnail/json/orphan");
+});
+
+test("writeDesign preserves existing <dir>/media binaries + sidecars across a page/component write", () => {
+  const dir = path.join(tmp(), "home.penpot");
+  writeDesign(dir, { manifest: '{:name "d"}', pages: { p1: "{:a 1}" }, components: {}, media: [] });
+  const mdir = path.join(dir, "media");
+  fs.writeFileSync(path.join(mdir, "a.png"), Buffer.from([1, 2, 3, 4]));
+  fs.writeFileSync(path.join(mdir, "a.json"), '{"width":1,"height":1,"mtype":"image/png","name":"a"}');
+  fs.writeFileSync(path.join(mdir, "a.thumbnail.png"), Buffer.from([9, 8, 7]));
+  const before = {
+    bin: fs.readFileSync(path.join(mdir, "a.png")),
+    json: fs.readFileSync(path.join(mdir, "a.json")),
+    thumb: fs.readFileSync(path.join(mdir, "a.thumbnail.png")),
+  };
+  // A later write that adds/changes pages + components MUST NOT prune or touch media.
+  writeDesign(dir, { manifest: '{:name "d"}', pages: { p1: "{:a 2}", p2: "{:b 3}" }, components: { c1: "{:c 4}" }, media: [] });
+  assert.ok(fs.existsSync(path.join(mdir, "a.png")), "media binary survived the write");
+  assert.deepEqual(fs.readFileSync(path.join(mdir, "a.png")), before.bin, "binary bytes identical");
+  assert.deepEqual(fs.readFileSync(path.join(mdir, "a.json")), before.json, "sidecar bytes identical");
+  assert.deepEqual(fs.readFileSync(path.join(mdir, "a.thumbnail.png")), before.thumb, "thumbnail bytes identical");
+});
+
 import { initProject, addDesign, resolveProjectRoot, listDesigns } from "../store/project.mjs";
 
 test("initProject creates a git repo + shared/; resolveProjectRoot walks up from a nested design dir; addDesign + listDesigns work", () => {

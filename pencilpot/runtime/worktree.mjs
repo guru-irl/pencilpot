@@ -21,9 +21,18 @@ import crypto from "node:crypto";
 
 /**
  * Stable content signature of a serialized working copy.  Order-independent
- * over the `pages`/`components` maps and `media` so that two stores with the
- * same content but different key ordering hash identically.  `:position-data`
- * is stripped so derived text-layout cache never registers as a user edit.
+ * over the `pages`/`components` maps so that two stores with the same content
+ * but different key ordering hash identically.  `:position-data` is stripped so
+ * derived text-layout cache never registers as a user edit.
+ *
+ * `media` is intentionally EXCLUDED: media binaries are disk-managed out-of-band
+ * (written directly by the upload RPC / import, never staged through the working
+ * copy).  The saved baseline derives media from disk filenames (readDesign) while
+ * a staged copy derives it from the file's :media registry (serializeStore), which
+ * is empty for these designs — folding media here would couple two divergent
+ * sources and spuriously mark every design with on-disk media dirty on first
+ * stage.  Any real image add/replace already dirties via the page EDN's
+ * :fill-image :id change.
  */
 function computeSig(parts) {
   if (!parts) return "";
@@ -31,7 +40,6 @@ function computeSig(parts) {
     manifest: parts.manifest || "",
     pages: Object.keys(parts.pages || {}).sort().map((k) => [k, stripPositionData(parts.pages[k])]),
     components: Object.keys(parts.components || {}).sort().map((k) => [k, stripPositionData(parts.components[k])]),
-    media: [...(parts.media || [])].sort(),
   };
   return crypto.createHash("sha1").update(JSON.stringify(norm)).digest("hex");
 }

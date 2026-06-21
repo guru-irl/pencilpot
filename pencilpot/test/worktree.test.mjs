@@ -110,6 +110,25 @@ test("dirty-sig: staging changed content marks dirty; save clears it", () => {
   initWorktree(null);
 });
 
+test("dirty-sig: media present on disk does NOT dirty a media-empty stage (media is disk-managed, out-of-band)", () => {
+  // Tasks 1/3 write media binaries + sidecars straight to <dir>/media, so
+  // readDesign(dir).media (the saved baseline) reports them.  serializeStore()
+  // derives media from the file's :media registry, which is empty for these
+  // designs, so a staged working copy carries media: [].  The dirty signature
+  // must IGNORE media (binaries are tracked out-of-band; any image add/replace
+  // already dirties via the page EDN) — otherwise every design with on-disk
+  // media would be spuriously dirty on the first stage after load.
+  const dir = seedBaseline("X");
+  fs.writeFileSync(path.join(dir, "media", "aaaa.png"), Buffer.from([1, 2, 3]));
+  fs.writeFileSync(path.join(dir, "media", "aaaa.json"), '{"width":1,"height":1,"mtype":"image/png","name":"a"}');
+  fs.writeFileSync(path.join(dir, "media", "aaaa.thumbnail.png"), Buffer.from([4, 5, 6]));
+  initWorktree(dir);
+  // baseline readDesign().media === ["aaaa"]; staged parts carry media: [] (empty registry)
+  stage(dir, partsOf("X"), 1);
+  assert.equal(status().dirty, false, "media-only difference (disk baseline vs media-empty stage) must NOT dirty");
+  initWorktree(null);
+});
+
 test("position-data-only change does NOT mark dirty; real edit does", () => {
   const s = createSession(JSON.stringify({ empty: true }));
   const b = s.addBoard(JSON.stringify({ x: 0, y: 0, width: 100, height: 100, name: "B" }));
