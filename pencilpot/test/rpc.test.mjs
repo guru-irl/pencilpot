@@ -4,6 +4,7 @@ import fs from "node:fs"; import os from "node:os"; import path from "node:path"
 import { createSession } from "../../headless-core/target/headless/penpot.js";
 import { writeDesign } from "../store/store.mjs";
 import { getFile, updateFileJson, handleRpc } from "../runtime/rpc.mjs";
+import { initWorktree, getStore, status } from "../runtime/worktree.mjs";
 import { EventEmitter } from "node:events";
 
 // ---------------------------------------------------------------------------
@@ -111,4 +112,28 @@ test("updateFileJson applies a change, persists to the store, bumps revn", () =>
   const { meta, transit } = getFile(dir);
   const s2 = createSession(JSON.stringify({ fromTransit: transit, meta }));
   assert.equal(JSON.parse(s2.getShape(r)).x, 99, "edit persisted to the store");
+});
+
+// ---------------------------------------------------------------------------
+// rename-file: persists the new name into the working-copy manifest :name and
+// marks the design dirty (written to disk on the next Save).
+// ---------------------------------------------------------------------------
+
+test("rename-file updates working-copy manifest :name and marks dirty", async () => {
+  const { dir } = seedDir();
+  // Bind the worktree to this dir so dirty-tracking applies (otherwise stage
+  // would write-through to disk and never set the in-memory dirty flag).
+  initWorktree(dir);
+  // Establish the saved baseline from disk before mutating.
+  assert.doesNotMatch(getStore(dir).manifest, /:name\s+"New Name"/, "precondition: not yet renamed");
+
+  // Transit-encoded {id, name} as the SPA's (rp/cmd! :rename-file …) sends it.
+  const body = '["^ ","~:id","~u0398e5fc-95c9-80d6-8008-29088f3ee53a","~:name","New Name"]';
+  const req = mockReq({ url: "/api/main/methods/rename-file", body });
+  const res = mockRes();
+  await handleRpc(req, res, { design: dir });
+
+  assert.equal(res.statusCode, 200, "rename-file returns 200");
+  assert.match(getStore(dir).manifest, /:name\s+"New Name"/, "manifest :name updated");
+  assert.equal(status().dirty, true, "design marked dirty after rename");
 });

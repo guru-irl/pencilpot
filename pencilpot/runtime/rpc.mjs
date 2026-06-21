@@ -310,6 +310,32 @@ export async function handleRpc(req, res, cfg) {
     return;
   }
 
+  if (command === "rename-file") {
+    // The SPA's dw/rename-file optimistically updates UI state then calls
+    // (rp/cmd! :rename-file {:id :name}).  Persist the new name into the
+    // working-copy manifest's top-level :name and mark the design dirty so the
+    // rename is written to disk on the next explicit Save.
+    const body = (await readBody(req)).toString("utf8");
+    // Name may arrive transit-encoded ("~:name","New") or as JSON (:name "New").
+    const m = body.match(/"~:name"\s*,?\s*"([^"]*)"/) || body.match(/:name\s+"([^"]*)"/);
+    const newName = m ? m[1] : null;
+    const store = cfg.design ? getStore(cfg.design) : null;
+    if (newName != null && store) {
+      // manifest.edn serializes keywords alphabetically, so the FIRST
+      // `:name "..."` is the design's file name (library refs serialize as
+      // {:id :path} with no nested :name before it).  Anchor to that first
+      // occurrence; JSON.stringify escapes quotes/backslashes in the new name.
+      store.manifest = store.manifest.replace(
+        /(:name\s+)"(?:[^"\\]|\\.)*"/,
+        `$1${JSON.stringify(newName)}`,
+      );
+      stage(cfg.design, store, status().revn);
+      broadcastStatus(status().dirty, status().revn);
+    }
+    res.writeHead(200, { "content-type": "application/transit+json" });
+    return res.end('["^ "]');
+  }
+
   // Drain request body for non-GET/HEAD requests so the socket stays clean.
   if (!["GET", "HEAD"].includes(req.method)) await readBody(req);
 
