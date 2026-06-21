@@ -145,11 +145,10 @@
            (let [{:keys [dirty saving]} pp-status
                  state (cond saving :saving dirty :unsaved :else :saved)]
              [:div {:class (stl/css :pp-save-status)}
-              [:span {:class (stl/css :pp-save-dot
-                                      (case state
-                                        :saving :pp-dot-saving
-                                        :unsaved :pp-dot-unsaved
-                                        :pp-dot-saved))}]
+              [:span {:class (stl/css-case :pp-save-dot true
+                                           :pp-dot-saving  (= state :saving)
+                                           :pp-dot-unsaved (= state :unsaved)
+                                           :pp-dot-saved   (= state :saved))}]
               [:span {:class (stl/css :pp-save-text)}
                (case state
                  :saving "Saving…"
