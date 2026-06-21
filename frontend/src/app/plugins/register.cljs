@@ -12,10 +12,8 @@
    [app.common.types.plugins :as ctp]
    [app.common.uri :as u]
    [app.common.uuid :as uuid]
-   [app.main.repo :as rp]
    [app.main.store :as st]
-   [app.util.object :as obj]
-   [beicon.v2.core :as rx]))
+   [app.util.object :as obj]))
 
 ;; Needs to be here because moving it to `app.main.data.workspace.mcp` will
 ;; cause a circular dependency
@@ -98,10 +96,10 @@
 
 (defn save-to-store
   []
-  ;; TODO: need this for the transition to the new schema. We can remove eventually
+  ;; pencilpot: no profile backend — keep the plugin registry in local profile
+  ;; state only (load-from-store reads it back from there).
   (let [registry (update @registry :data d/update-vals d/without-nils)]
-    (->> (rp/cmd! :update-profile-props {:props {:plugins registry}})
-         (rx/subs! identity))))
+    (swap! st/state assoc-in [:profile :props :plugins] registry)))
 
 (defn load-from-store
   []
