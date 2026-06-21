@@ -16,19 +16,21 @@
 // shared libraries, read-only) always reads straight from disk.
 
 import { readDesign, writeDesign } from "../store/index.mjs";
+import { stripPositionData } from "../store/edn.mjs";
 import crypto from "node:crypto";
 
 /**
  * Stable content signature of a serialized working copy.  Order-independent
  * over the `pages`/`components` maps and `media` so that two stores with the
- * same content but different key ordering hash identically.
+ * same content but different key ordering hash identically.  `:position-data`
+ * is stripped so derived text-layout cache never registers as a user edit.
  */
 function computeSig(parts) {
   if (!parts) return "";
   const norm = {
     manifest: parts.manifest || "",
-    pages: Object.keys(parts.pages || {}).sort().map((k) => [k, parts.pages[k]]),
-    components: Object.keys(parts.components || {}).sort().map((k) => [k, parts.components[k]]),
+    pages: Object.keys(parts.pages || {}).sort().map((k) => [k, stripPositionData(parts.pages[k])]),
+    components: Object.keys(parts.components || {}).sort().map((k) => [k, stripPositionData(parts.components[k])]),
     media: [...(parts.media || [])].sort(),
   };
   return crypto.createHash("sha1").update(JSON.stringify(norm)).digest("hex");
