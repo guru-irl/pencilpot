@@ -10,6 +10,7 @@
    [app.common.data.macros :as dm]
    [app.main.data.common :as dcm]
    [app.main.data.modal :as modal]
+   [app.main.data.pencilpot :as pencilpot]
    [app.main.data.workspace :as dw]
    [app.main.data.workspace.colors :as dc]
    [app.main.refs :as refs]
@@ -36,6 +37,10 @@
 
         persistence-status
         (get persistence :status)
+
+        pp-enabled? (pencilpot/enabled?)
+        pp-status   (mf/deref pencilpot/status)
+        pp-rename   (mf/deref pencilpot/rename-request)
 
         editing*    (mf/use-state false)
         editing?    (deref editing*)
@@ -87,6 +92,10 @@
       (when ^boolean editing?
         (dom/select-text! (mf/ref-val input-ref))))
 
+    (mf/with-effect [pp-rename]
+      (when (and pp-enabled? (pos? pp-rename))
+        (reset! editing* true)))
+
     [:header {:class (dm/str class " " (stl/css :workspace-header-left))}
      [:a {:on-click go-back
           :class (stl/css :main-icon)} deprecated-icon/logo-icon]
@@ -109,26 +118,42 @@
          {:class (stl/css :file-name)
           :title file-name
           :on-double-click start-editing-name}
-         ;;-- Persistende state widget
-         [:div {:class (case persistence-status
-                         :pending (stl/css :status-notification :pending-status)
-                         :saving (stl/css :status-notification :saving-status)
-                         :saved (stl/css :status-notification :saved-status)
-                         :error (stl/css :status-notification :error-status)
-                         (stl/css :status-notification))
-                :title (case persistence-status
-                         :pending (tr "workspace.header.saving")
-                         :saving (tr "workspace.header.saving")
-                         :saved (tr "workspace.header.saved")
-                         :error (tr "workspace.header.save-error")
-                         nil)}
-          (case persistence-status
-            :pending deprecated-icon/status-alert
-            :saving deprecated-icon/status-alert
-            :saved deprecated-icon/status-tick
-            :error deprecated-icon/status-wrong
-            nil)]
-         [:div {:class (stl/css :file-name-label)} file-name]])]
+         ;;-- Persistende state widget (stock Penpot only)
+         (when-not ^boolean pp-enabled?
+           [:div {:class (case persistence-status
+                           :pending (stl/css :status-notification :pending-status)
+                           :saving (stl/css :status-notification :saving-status)
+                           :saved (stl/css :status-notification :saved-status)
+                           :error (stl/css :status-notification :error-status)
+                           (stl/css :status-notification))
+                  :title (case persistence-status
+                           :pending (tr "workspace.header.saving")
+                           :saving (tr "workspace.header.saving")
+                           :saved (tr "workspace.header.saved")
+                           :error (tr "workspace.header.save-error")
+                           nil)}
+            (case persistence-status
+              :pending deprecated-icon/status-alert
+              :saving deprecated-icon/status-alert
+              :saved deprecated-icon/status-tick
+              :error deprecated-icon/status-wrong
+              nil)])
+         [:div {:class (stl/css :file-name-label)} file-name]
+         ;;-- Pencilpot native save-status subtitle (dot + text)
+         (when ^boolean pp-enabled?
+           (let [{:keys [dirty saving]} pp-status
+                 state (cond saving :saving dirty :unsaved :else :saved)]
+             [:div {:class (stl/css :pp-save-status)}
+              [:span {:class (stl/css :pp-save-dot
+                                      (case state
+                                        :saving :pp-dot-saving
+                                        :unsaved :pp-dot-unsaved
+                                        :pp-dot-saved))}]
+              [:span {:class (stl/css :pp-save-text)}
+               (case state
+                 :saving "Saving…"
+                 :unsaved "Unsaved changes"
+                 "Saved")]]))])]
      (when ^boolean shared?
        [:span {:class (stl/css :shared-badge)} deprecated-icon/library])
      [:div {:class (stl/css :menu-section)}
