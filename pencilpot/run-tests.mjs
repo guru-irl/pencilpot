@@ -292,6 +292,9 @@ async function main() {
       path.join(HERE, "test/fonts.test.mjs"),
       path.join(HERE, "test/import-media.test.mjs"),
       path.join(HERE, "test/media-route.test.mjs"),
+      path.join(HERE, "test/multipart.test.mjs"),
+      path.join(HERE, "test/image-size.test.mjs"),
+      path.join(HERE, "test/upload-media.test.mjs"),
       path.join(HERE, "test/terminal.test.mjs"),
     ];
     console.log(col("cyan", col("bold", "\n▶ tier: integration")));

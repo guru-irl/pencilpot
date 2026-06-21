@@ -1,6 +1,8 @@
 // Real RPC handlers: get-file/update-file from on-disk EDN store + synthetic
 // boot stubs for all other SPA endpoints.
 import path from "node:path";
+import fs from "node:fs";
+import { randomUUID } from "node:crypto";
 import { createSession } from "../../headless-core/target/headless/penpot.js";
 import { getStore, stage, status } from "./worktree.mjs";
 import { readFonts } from "../store/fonts.mjs";
@@ -8,6 +10,9 @@ import { resolveProjectRoot, resolveProject } from "../store/project.mjs";
 import { readBody } from "./proxy.mjs";
 import { stub, isStub, buildUpdateFileResponse } from "./stubs.mjs";
 import { broadcastStatus } from "./live.mjs";
+import { parseMultipart } from "./multipart.mjs";
+import { imageSize } from "./image-size.mjs";
+import { resolveMediaAsset } from "./media.mjs";
 
 /** Extract the RPC command name from a URL like /api/main/methods/get-file?... */
 const cmd = (url) => url.split("?")[0].split("/").filter(Boolean).pop();
@@ -247,6 +252,100 @@ export function encodeTransitFontVariants(variants) {
 }
 
 // ---------------------------------------------------------------------------
+// Media objects: local /media writes for upload / create-from-url / clone
+// ---------------------------------------------------------------------------
+
+// file-media-object content-type → on-disk extension (mirrors media.mjs).
+const MTYPE_EXT = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/gif": "gif",
+  "image/webp": "webp",
+  "image/avif": "avif",
+  "image/bmp": "bmp",
+  "image/svg+xml": "svg",
+};
+
+function extFor(mtype, filename) {
+  if (mtype && MTYPE_EXT[mtype]) return MTYPE_EXT[mtype];
+  if (filename && filename.includes(".")) return filename.slice(filename.lastIndexOf(".") + 1).toLowerCase();
+  return "bin";
+}
+
+/**
+ * Encode a media-object as a penpot transit+json map.  The :id is encoded as a
+ * transit uuid (`~u…`) so the SPA's transit reader hands the workspace a real
+ * UUID (the value it bakes into the shape's :fill-image :id).
+ */
+function encodeTransitMediaObject(o) {
+  return JSON.stringify([
+    "^ ",
+    "~:id", `~u${o.id}`,
+    "~:name", o.name,
+    "~:width", o.width,
+    "~:height", o.height,
+    "~:mtype", o.mtype,
+    "~:is-local", o["is-local"],
+    "~:created-at", o["created-at"],
+    "~:modified-at", o["modified-at"],
+  ]);
+}
+
+/**
+ * Write an image blob to `<design>/media/<new-id>.<ext>` + a `<new-id>.json`
+ * sidecar ({width,height,mtype,name}) and return the media-object map.
+ * Dimensions are probed from the bytes; the multipart-declared mtype is the
+ * fallback when the probe can't read the format.
+ */
+function writeMediaObject(designDir, { bytes, mtype, name, filename, isLocal = true }) {
+  if (!designDir) throw new Error("upload: no design configured");
+  const probe = imageSize(bytes);
+  const finalMtype = probe?.mtype || mtype || "application/octet-stream";
+  const width = probe?.width ?? 0;
+  const height = probe?.height ?? 0;
+  const id = randomUUID();
+  const ext = extFor(finalMtype, filename);
+  const objName = name || filename || "image";
+
+  const mediaDir = path.join(designDir, "media");
+  fs.mkdirSync(mediaDir, { recursive: true });
+  fs.writeFileSync(path.join(mediaDir, `${id}.${ext}`), bytes);
+  fs.writeFileSync(path.join(mediaDir, `${id}.json`),
+    JSON.stringify({ width, height, mtype: finalMtype, name: objName }));
+
+  const now = new Date().toISOString();
+  return { id, name: objName, width, height, mtype: finalMtype, "is-local": isLocal !== false, "created-at": now, "modified-at": now };
+}
+
+/** Strip a transit uuid prefix (`~u`) if present. */
+const unTransitUuid = (v) => (typeof v === "string" ? v.replace(/^~u/, "") : v);
+
+/** Clone an on-disk media object (`<src>.<ext>` + sidecar + optional thumbnail) under a new id. */
+function cloneMediaObject(designDir, srcId) {
+  if (!designDir) throw new Error("clone: no design configured");
+  const asset = resolveMediaAsset(designDir, srcId);
+  if (!asset) throw new Error(`clone: source media ${srcId} not found`);
+  const mediaDir = path.join(designDir, "media");
+  const ext = asset.filePath.slice(asset.filePath.lastIndexOf(".") + 1).toLowerCase();
+  const newId = randomUUID();
+
+  fs.copyFileSync(asset.filePath, path.join(mediaDir, `${newId}.${ext}`));
+
+  let meta = { width: 0, height: 0, mtype: asset.contentType, name: "image" };
+  try { meta = { ...meta, ...JSON.parse(fs.readFileSync(path.join(mediaDir, `${srcId}.json`), "utf8")) }; } catch { /* no sidecar */ }
+  fs.writeFileSync(path.join(mediaDir, `${newId}.json`), JSON.stringify(meta));
+
+  const thumb = resolveMediaAsset(designDir, srcId, { thumbnail: true });
+  if (thumb && thumb.filePath !== asset.filePath) {
+    const tExt = thumb.filePath.slice(thumb.filePath.lastIndexOf(".") + 1).toLowerCase();
+    fs.copyFileSync(thumb.filePath, path.join(mediaDir, `${newId}.thumbnail.${tExt}`));
+  }
+
+  const now = new Date().toISOString();
+  return { id: newId, name: meta.name, width: meta.width, height: meta.height, mtype: meta.mtype, "is-local": true, "created-at": now, "modified-at": now };
+}
+
+// ---------------------------------------------------------------------------
 // HTTP router — called by server.mjs for every /api/* request
 // ---------------------------------------------------------------------------
 
@@ -358,6 +457,49 @@ export async function handleRpc(req, res, cfg) {
     }
     res.writeHead(200, { "content-type": "application/transit+json" });
     return res.end('["^ "]');
+  }
+
+  // --- Media objects: write the uploaded/fetched/cloned blob into <design>/media
+  //     and return a real media-object so "add/replace image" works (and the
+  //     `unhandled RPC upload-file-media-object` warning stops firing).
+  if (command === "upload-file-media-object") {
+    const body = await readBody(req);
+    const { fields, file } = parseMultipart(body, req.headers["content-type"]);
+    if (!file) throw new Error("upload-file-media-object: no file part in multipart body");
+    const obj = writeMediaObject(cfg.design, {
+      bytes: file.bytes, mtype: file.mtype, name: fields["name"], filename: file.filename,
+      isLocal: fields["is-local"] !== "false",
+    });
+    res.writeHead(200, { "content-type": wantTransit ? "application/transit+json" : "application/json" });
+    res.end(wantTransit ? encodeTransitMediaObject(obj) : JSON.stringify(obj));
+    return;
+  }
+
+  if (command === "create-file-media-object-from-url") {
+    const bodyStr = (await readBody(req)).toString("utf8");
+    const url = transitGet(bodyStr, "url");
+    const name = transitGet(bodyStr, "name");
+    if (!url) throw new Error("create-file-media-object-from-url: missing url");
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`create-file-media-object-from-url: fetch ${url} → HTTP ${resp.status}`);
+    const bytes = Buffer.from(await resp.arrayBuffer());
+    const obj = writeMediaObject(cfg.design, {
+      bytes, mtype: resp.headers.get("content-type") || undefined,
+      name, filename: url.split("/").pop(),
+    });
+    res.writeHead(200, { "content-type": wantTransit ? "application/transit+json" : "application/json" });
+    res.end(wantTransit ? encodeTransitMediaObject(obj) : JSON.stringify(obj));
+    return;
+  }
+
+  if (command === "clone-file-media-object") {
+    const bodyStr = (await readBody(req)).toString("utf8");
+    const srcId = unTransitUuid(transitGet(bodyStr, "id"));
+    if (!srcId) throw new Error("clone-file-media-object: missing id");
+    const obj = cloneMediaObject(cfg.design, srcId);
+    res.writeHead(200, { "content-type": wantTransit ? "application/transit+json" : "application/json" });
+    res.end(wantTransit ? encodeTransitMediaObject(obj) : JSON.stringify(obj));
+    return;
   }
 
   // Drain request body for non-GET/HEAD requests so the socket stays clean.
