@@ -109,3 +109,32 @@ test("dirty-sig: staging changed content marks dirty; save clears it", () => {
   assert.equal(status().dirty, false, "re-staging saved content is not dirty");
   initWorktree(null);
 });
+
+test("position-data-only change does NOT mark dirty; real edit does", () => {
+  const s = createSession(JSON.stringify({ empty: true }));
+  const b = s.addBoard(JSON.stringify({ x: 0, y: 0, width: 100, height: 100, name: "B" }));
+  s.closeBoard();
+  const dir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "pp-pd-")), "home.penpot");
+  // Seed a page EDN that carries a :position-data vector.
+  const parts = JSON.parse(s.serializeStore());
+  const pid = Object.keys(parts.pages)[0];
+  parts.pages[pid] = parts.pages[pid].replace(/\}\s*$/, ' :position-data [#penpot/rect "1,2,3"]}');
+  writeDesign(dir, parts);
+
+  initWorktree(dir);
+  // Re-read baseline (writeDesign strips pd on disk in Task A3, but the in-memory
+  // store still carries it; either way the dirty check ignores pd).
+  assert.equal(status().dirty, false, "clean after init");
+
+  // Stage a store whose ONLY difference is the position-data value.
+  const pdChanged = { ...parts, pages: { ...parts.pages,
+    [pid]: parts.pages[pid].replace("1,2,3", "9,9,9") } };
+  stage(dir, pdChanged, 1);
+  assert.equal(status().dirty, false, "position-data-only change must NOT dirty");
+
+  // Stage a real content change (rename) — must dirty.
+  const realEdit = { ...parts, pages: { ...parts.pages,
+    [pid]: parts.pages[pid].replace(':name "B"', ':name "RENAMED"') } };
+  stage(dir, realEdit, 2);
+  assert.equal(status().dirty, true, "real content edit MUST dirty");
+});
