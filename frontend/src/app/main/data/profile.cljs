@@ -305,8 +305,7 @@
        (let [version (or version (:main cf/version))
              props   {:onboarding-viewed true
                       :release-notes-viewed version}]
-         (->> (rp/cmd! :update-profile-props {:props props})
-              (rx/map (constantly (refresh-profile)))))))))
+         (rx/of (update-profile-props props)))))))
 
 (defn mark-questions-as-answered
   [onboarding-questions]
@@ -319,8 +318,7 @@
     (watch [_ _ _]
       (let [props {:onboarding-questions-answered true
                    :onboarding-questions onboarding-questions}]
-        (->> (rp/cmd! :update-profile-props {:props props})
-             (rx/map (constantly (refresh-profile))))))))
+        (rx/of (update-profile-props props))))))
 
 ;; --- Update Photo
 
