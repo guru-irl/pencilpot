@@ -97,12 +97,12 @@
 (defn fetch-profile
   []
   (ptk/reify ::fetch-profile
+    ;; pencilpot: no get-profile RPC. The local profile is seeded at boot
+    ;; (app.main/seed-local-profile); re-emit it so refresh-profile and any other
+    ;; ::profile-fetched waiters resolve locally.
     ptk/WatchEvent
-    (watch [_ _ _]
-      (->> (rp/cmd! :get-profile)
-           (rx/mapcat on-fetch-profile-success)
-           (rx/map (partial ptk/data-event ::profile-fetched))
-           (rx/catch on-fetch-profile-exception)))))
+    (watch [_ state _]
+      (rx/of (ptk/data-event ::profile-fetched (:profile state))))))
 
 (defn refresh-profile
   []
