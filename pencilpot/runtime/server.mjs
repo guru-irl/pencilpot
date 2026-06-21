@@ -134,6 +134,16 @@ const server = http.createServer(async (req, res) => {
       return handleLiveSse(req, res, liveWatcher);
     }
 
+    // Authoritative dirty/revn status — lets a client reconcile after a save
+    // (closes the window where a concurrent update-file's dirty echo was
+    // suppressed while the client's own save was in flight).
+    if (req.method === "GET" && req.url === "/pencilpot/status") {
+      const s = worktreeStatus();
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ dirty: s.dirty, revn: s.revn }));
+      return;
+    }
+
     // Manual save: flush the in-memory working copy to disk (Ctrl/Cmd+S).
     if (req.method === "POST" && req.url === "/pencilpot/save") {
       const r = saveWorktree();

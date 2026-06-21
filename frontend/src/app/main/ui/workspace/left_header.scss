@@ -68,6 +68,12 @@
 
 .file-name-label {
   @include deprecated.text-ellipsis;
+}
+
+// width:100% only in pencilpot's stacked (column) layout, so the subtitle below
+// spans the full width.  Scoped to .file-name-pp so STOCK's row layout (where a
+// greedy 100% label would crowd the native save-status widget) is untouched.
+.file-name-pp .file-name-label {
   width: 100%;
 }
 

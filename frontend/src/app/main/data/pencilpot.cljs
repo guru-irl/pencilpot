@@ -40,7 +40,18 @@
       (-> (js/fetch "/pencilpot/save" #js {:method "POST"})
           (.then  (fn [res]
                     (if (.-ok res)
-                      (reset! status {:dirty false :saving false})
+                      ;; Clear the in-flight flag FIRST, then reconcile :dirty
+                      ;; from the server's authoritative status.  If a
+                      ;; concurrent update-file staged a late edit during this
+                      ;; save, its dirty=true echo was suppressed by on-status
+                      ;; while :saving was set; this GET runs after :saving
+                      ;; clears and captures that edit instead of forcing a
+                      ;; stale "Saved" (which would let beforeunload drop it).
+                      (do (swap! status assoc :saving false :dirty false)
+                          (-> (js/fetch "/pencilpot/status")
+                              (.then (fn [r] (.json r)))
+                              (.then (fn [s] (swap! status assoc :dirty (boolean (obj/get s "dirty")))))
+                              (.catch (fn [_] nil))))
                       (do (swap! status assoc :saving false)
                           (js/alert "pencilpot: save failed — check the runtime log.")))))
           (.catch (fn [_]
