@@ -319,6 +319,13 @@ export async function importPenpot(filePath) {
         if (dotIdx === -1) continue;
         const sid = entry.slice(0, dotIdx);
         const ext = entry.slice(dotIdx + 1);
+        // A .penpot stores each storage object as a PAIR: the image binary
+        // (objects/<id>.jpg|png|…) AND a metadata twin (objects/<id>.json).
+        // Both share the same id stem, so without this guard the .json twin
+        // clobbers the real image in the map and the descriptor join below
+        // resolves to JSON text instead of pixels.  Media binaries are always
+        // images — never a bare .json — so skipping json storage objects is safe.
+        if (ext === "json") continue;
         storageById.set(sid, { srcPath: path.join(objectsDir, entry), ext });
       }
     }
