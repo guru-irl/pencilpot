@@ -16,6 +16,23 @@
 // shared libraries, read-only) always reads straight from disk.
 
 import { readDesign, writeDesign } from "../store/index.mjs";
+import crypto from "node:crypto";
+
+/**
+ * Stable content signature of a serialized working copy.  Order-independent
+ * over the `pages`/`components` maps and `media` so that two stores with the
+ * same content but different key ordering hash identically.
+ */
+function computeSig(parts) {
+  if (!parts) return "";
+  const norm = {
+    manifest: parts.manifest || "",
+    pages: Object.keys(parts.pages || {}).sort().map((k) => [k, parts.pages[k]]),
+    components: Object.keys(parts.components || {}).sort().map((k) => [k, parts.components[k]]),
+    media: [...(parts.media || [])].sort(),
+  };
+  return crypto.createHash("sha1").update(JSON.stringify(norm)).digest("hex");
+}
 
 // ── Module-level singleton state ────────────────────────────────────────────
 let _dir = null;        // absolute path of the managed (open) design dir
@@ -23,6 +40,7 @@ let _store = null;      // in-memory parts { manifest, pages, components, media 
 let _dirty = false;     // unsaved edits present?
 let _revn = 0;          // last applied revision (for diagnostics / status)
 let _savedRevn = 0;     // revision last flushed to disk
+let _savedSig = "";     // content signature of the last-saved (on-disk) working copy
 
 /** Bind the working copy to the open design dir (called once at server start). */
 export function initWorktree(dir) {
@@ -31,6 +49,7 @@ export function initWorktree(dir) {
   _dirty = false;
   _revn = 0;
   _savedRevn = 0;
+  _savedSig = "";
 }
 
 /**
@@ -40,7 +59,10 @@ export function initWorktree(dir) {
  */
 export function getStore(dir) {
   if (dir !== _dir) return readDesign(dir);
-  if (!_store) _store = readDesign(dir);
+  if (!_store) {
+    _store = readDesign(dir);
+    _savedSig = computeSig(_store);   // freshly-read disk content is the saved baseline
+  }
   return _store;
 }
 
@@ -54,8 +76,13 @@ export function stage(dir, parts, revn) {
     writeDesign(dir, parts);
     return;
   }
+  // Ensure the saved baseline signature is established before comparing.
+  if (!_store) {
+    _store = readDesign(dir);
+    _savedSig = computeSig(_store);
+  }
   _store = parts;
-  _dirty = true;
+  _dirty = computeSig(parts) !== _savedSig;   // dirty only when content actually changed
   if (typeof revn === "number") _revn = revn;
 }
 
@@ -66,6 +93,7 @@ export function save() {
   writeDesign(_dir, _store);
   _dirty = false;
   _savedRevn = _revn;
+  _savedSig = computeSig(_store);   // the just-written content is now the saved baseline
   return { saved: true, dirty: false, revn: _revn };
 }
 
@@ -73,6 +101,7 @@ export function save() {
 export function discard() {
   _store = _dir ? readDesign(_dir) : null;
   _dirty = false;
+  _savedSig = computeSig(_store);   // reloaded disk content is the saved baseline
   return { discarded: true, dirty: false, revn: _savedRevn };
 }
 

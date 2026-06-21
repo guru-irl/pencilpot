@@ -4,7 +4,7 @@ import fs from "node:fs"; import os from "node:os"; import path from "node:path"
 import { createSession } from "../../headless-core/target/headless/penpot.js";
 import { writeDesign, readDesign } from "../store/store.mjs";
 import { getFile, updateFileJson } from "../runtime/rpc.mjs";
-import { initWorktree, save, discard, status } from "../runtime/worktree.mjs";
+import { initWorktree, stage, save, discard, status } from "../runtime/worktree.mjs";
 
 // Seed a tiny design dir with a single rect we can mutate.
 function seedDir() {
@@ -76,5 +76,36 @@ test("manual-save: discard() reverts the working copy to the on-disk version", (
   assert.equal(shapeXFromDisk(dir, r), 10, "disk unchanged throughout");
 
   // Reset module state so other test files aren't affected by the bound dir.
+  initWorktree(null);
+});
+
+// ── Content-signature dirty detection ───────────────────────────────────────
+// A design goes dirty only when the staged working copy actually differs from
+// the last-saved content, not on every update-file RPC.
+const partsOf = (name) => ({ manifest: `{:name "${name}"}`, pages: { p1: "{:a 1}" }, components: {}, media: [] });
+
+function seedBaseline(name) {
+  const dir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "pp-wt-")), "home.penpot");
+  writeDesign(dir, partsOf(name));   // on-disk saved baseline
+  return dir;
+}
+
+test("dirty-sig: staging content identical to the saved baseline does NOT mark dirty", () => {
+  const dir = seedBaseline("X");
+  initWorktree(dir);
+  stage(dir, partsOf("X"), 1);          // same content as saved baseline
+  assert.equal(status().dirty, false, "no-op stage must not be dirty");
+  initWorktree(null);
+});
+
+test("dirty-sig: staging changed content marks dirty; save clears it", () => {
+  const dir = seedBaseline("X");
+  initWorktree(dir);
+  stage(dir, partsOf("Y"), 2);          // changed
+  assert.equal(status().dirty, true, "changed content is dirty");
+  save();
+  assert.equal(status().dirty, false, "save clears dirty");
+  stage(dir, partsOf("Y"), 3);          // same as just-saved
+  assert.equal(status().dirty, false, "re-staging saved content is not dirty");
   initWorktree(null);
 });

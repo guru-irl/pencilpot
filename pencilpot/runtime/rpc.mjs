@@ -2,7 +2,7 @@
 // boot stubs for all other SPA endpoints.
 import path from "node:path";
 import { createSession } from "../../headless-core/target/headless/penpot.js";
-import { getStore, stage } from "./worktree.mjs";
+import { getStore, stage, status } from "./worktree.mjs";
 import { readFonts } from "../store/fonts.mjs";
 import { resolveProjectRoot, resolveProject } from "../store/project.mjs";
 import { readBody } from "./proxy.mjs";
@@ -49,7 +49,7 @@ function persistChanges(dir, applyFn) {
   applyFn(s);
   const revn = s.bumpRevn();
   stage(dir, JSON.parse(s.serializeStore()), revn);   // ← in memory, not disk
-  broadcastStatus(true, revn);                        // ← mark SPA "unsaved"
+  broadcastStatus(status().dirty, revn);              // ← reflect ACTUAL dirty state
   return { revn };
 }
 
