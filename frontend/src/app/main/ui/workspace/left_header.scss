@@ -54,9 +54,16 @@
 
   text-transform: none;
   color: var(--title-foreground-color-hover);
-  align-items: flex-start;
+  align-items: center;
   display: flex;
+  flex-direction: row;
+}
+
+.file-name-pp {
   flex-direction: column;
+  align-items: flex-start;
+  height: auto;
+  overflow: visible;
 }
 
 .file-name-label {

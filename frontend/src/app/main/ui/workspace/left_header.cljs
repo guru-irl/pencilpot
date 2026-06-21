@@ -115,7 +115,8 @@
           :auto-focus true
           :default-value (:name file "")}]
         [:div
-         {:class (stl/css :file-name)
+         {:class (stl/css-case :file-name true
+                               :file-name-pp pp-enabled?)
           :title file-name
           :on-double-click start-editing-name}
          ;;-- Persistende state widget (stock Penpot only)
