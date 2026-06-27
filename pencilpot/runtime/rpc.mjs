@@ -26,6 +26,63 @@ function sessionFor(dir) {
   return createSession(JSON.stringify({ fromStore: getStore(dir) }));
 }
 
+// ── Read-session cache ──────────────────────────────────────────────────────
+// The FIRST createSession() in a server process pays a one-time ~8.5-9.4s engine
+// warmup (CLJS JIT/init); every createSession after that is ~300ms.  Read-only
+// endpoints (get-file, get-view-only-bundle) re-hydrate a session on every call,
+// so without caching each repeated read pays ~300ms and the very first one pays
+// the full cold cost.  We cache ONE hydrated session for the OPEN design, keyed
+// on the working-copy object IDENTITY (NOT (dir,revn)):
+//
+//   - getStore(openDir) returns the stable in-memory `_store` reference; that
+//     reference is replaced EXACTLY when content changes — stage() (edit) and
+//     discard() (revert) both assign a fresh `_store`, while save() and plain
+//     reads keep the same reference.  So identity-keying invalidates precisely
+//     on content change and — crucially — also on discard, which reverts content
+//     WITHOUT bumping revn: a naive (dir,revn) key would serve a STALE post-edit
+//     session after a discard.  Identity keying is strictly safer than (dir,revn).
+//   - For any NON-open dir (linked libraries) getStore returns a fresh readDesign
+//     object every call, so those never cache (always fresh) and never evict the
+//     open-design session.
+//
+// SAFETY: reads never mutate the session (getFileResponse / getViewerBundle are
+// pure reads) and createSession / those getters are synchronous, so a cached
+// session shared across concurrent reads at the same content is safe.  WRITES
+// (persistChanges) keep using a fresh sessionFor() — after their stage() the
+// `_store` ref changes, auto-invalidating this cache (read-after-write is fresh).
+let _readSession = { store: null, session: null };
+function readSessionFor(dir) {
+  // Only the open design is cached; libraries / other dirs always read fresh.
+  if (status().design !== dir) return sessionFor(dir);
+  const store = getStore(dir);
+  if (_readSession.store === store) return _readSession.session;
+  const session = createSession(JSON.stringify({ fromStore: store }));
+  _readSession = { store, session };
+  return session;
+}
+
+/** Warm the headless engine OFF the request path (called at server boot).
+ *  Builds + caches the open design's read session so the user's first get-file /
+ *  get-view-only-bundle is ~300ms instead of the ~8.5-9.4s cold createSession.
+ *  Best-effort: a failure is swallowed (the engine just warms on first real use).
+ *  NOTE: createSession is synchronous, so this blocks the event loop for the
+ *  one-time warmup duration; callers should defer it (setImmediate) so listen()
+ *  + the banner happen first and the initial static-asset burst is served. */
+export function warmEngine(dir) {
+  if (!dir) return;
+  const t0 = Date.now();
+  try {
+    readSessionFor(dir);
+    console.log(`[pencilpot] engine warmed in ${Date.now() - t0}ms`);
+  } catch (e) {
+    console.warn(`[pencilpot] engine warmup skipped: ${e?.message ?? e}`);
+  }
+}
+
+/** Test-only: expose the cached read-session resolver so tests can assert
+ *  cache-hit (identity) and write-invalidation behavior. */
+export { readSessionFor as __readSessionFor };
+
 /**
  * Extract a value from a transit-JSON map array by keyword name.
  * Transit maps are encoded as ["^ ", "~:key1", val1, "~:key2", val2, ...].
@@ -78,7 +135,7 @@ function persistChanges(dir, applyFn) {
  * sees the file data in the expected position.
  */
 export function getFile(dir) {
-  const result = JSON.parse(sessionFor(dir).getFileResponse());
+  const result = JSON.parse(readSessionFor(dir).getFileResponse());
   // Attach the transit-encoded :data blob to meta so consumers see meta.data.
   // transitGet does a raw JSON-level extraction (no full transit decode needed
   // here — the value is passed back into createSession via fromTransit).
@@ -578,7 +635,7 @@ export async function handleRpc(req, res, cfg) {
     const teamId = "0398e5fc-95c9-80d6-8008-29071f0fdaed";
     const projectId = "0398e5fc-95c9-80d6-8008-29071f0fdaf0";
     const { transit } = JSON.parse(
-      sessionFor(dir).getViewerBundle(
+      readSessionFor(dir).getViewerBundle(
         JSON.stringify({ teamId, projectId, projectName, fonts }),
       ),
     );

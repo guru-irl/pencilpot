@@ -2,7 +2,7 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { attachWsStub } from "./proxy.mjs";
-import { handleRpc } from "./rpc.mjs";
+import { handleRpc, warmEngine } from "./rpc.mjs";
 import { serveStatic } from "./static.mjs";
 import { resolveMediaAsset } from "./media.mjs";
 import { resolveProject } from "../store/project.mjs";
@@ -204,4 +204,12 @@ const server = http.createServer(async (req, res) => {
 attachWsStub(server);
 // Integrated terminal: PTY bridged over WS at /pencilpot/terminal, CWD = project dir.
 attachTerminal(server, CONFIG);
-server.listen(PORT, () => console.log(`pencilpot runtime on http://localhost:${PORT}  project=${CONFIG.project} design=${CONFIG.design} fileId=${fileId}`));
+server.listen(PORT, () => {
+  console.log(`pencilpot runtime on http://localhost:${PORT}  project=${CONFIG.project} design=${CONFIG.design} fileId=${fileId}`);
+  // Warm the headless engine off the request path: the first createSession in a
+  // fresh process pays a one-time ~8.5-9.4s CLJS JIT/init cost, so do it now
+  // (deferred a tick so listen + banner + the initial static-asset burst go
+  // first) rather than making the user's first get-file / get-view-only-bundle
+  // pay it.  Populates the read-session cache.  Best-effort.
+  setImmediate(() => warmEngine(CONFIG.design));
+});

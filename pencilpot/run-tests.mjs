@@ -277,6 +277,7 @@ async function main() {
       path.join(HERE, "test/store.test.mjs"),
       path.join(HERE, "test/project.test.mjs"),
       path.join(HERE, "test/live.test.mjs"),
+      path.join(HERE, "test/read-session-cache.test.mjs"),
     ];
     console.log(col("cyan", col("bold", "\n▶ tier: unit")));
     const stats = runNodeTier(files);
