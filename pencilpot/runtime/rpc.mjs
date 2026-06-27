@@ -251,6 +251,51 @@ export function encodeTransitFontVariants(variants) {
   return JSON.stringify(arr);
 }
 
+/**
+ * Plain-object twin of encodeTransitFontVariants for the view-only bundle's
+ * :fonts. The headless engine js->clj-keywordizes these maps, so the hyphenated
+ * string keys here become the same :font-id / :font-family / :woff1-file-id / …
+ * keys the SPA's df/fonts-fetched + generate-custom-font-variant-css read. This
+ * is deliberately the SAME logical field set encodeTransitFontVariants hand-
+ * encodes for get-font-variants (kept in sync) — minus the transit tags, since
+ * the engine encodes the whole bundle (fonts included) in one transit pass.
+ */
+export function fontVariantsForBundle(variants) {
+  return variants.map((v) => {
+    const { id, fontId, family, weight, style, variable, axes, instances } = v;
+    // Serve the RAW (un-"custom-"-prefixed) font-id — fonts.cljs adapt-font-id
+    // always prepends "custom-"; a pre-prefixed id yields "custom-custom-".
+    const rawFontId = String(fontId ?? id).replace(/^custom-/, "");
+    // One file per variant, served by /assets/by-id/<id>; point every *-file-id
+    // slot at the same id (the browser sniffs the real format).
+    const map = {
+      "id": id,
+      "font-id": rawFontId,
+      "font-family": family,
+      "font-weight": weight,
+      "font-style": style,
+      "woff2-file-id": id,
+      "woff1-file-id": id,
+      "ttf-file-id": id,
+      "otf-file-id": id,
+    };
+    if (variable) {
+      map["variable"] = true;
+      map["axes"] = (axes ?? []).map((a) => ({
+        "tag": a.tag, "min": a.min, "max": a.max,
+        "default": a.default, "name": a.name ?? a.tag,
+      }));
+      if (Array.isArray(instances) && instances.length > 0) {
+        map["instances"] = instances.map((inst) => ({
+          "name": inst.name ?? "",
+          "coords": { ...(inst.coords ?? {}) },
+        }));
+      }
+    }
+    return map;
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Media objects: local /media writes for upload / create-from-url / clone
 // ---------------------------------------------------------------------------
@@ -499,6 +544,49 @@ export async function handleRpc(req, res, cfg) {
     const obj = cloneMediaObject(cfg.design, srcId);
     res.writeHead(200, { "content-type": wantTransit ? "application/transit+json" : "application/json" });
     res.end(wantTransit ? encodeTransitMediaObject(obj) : JSON.stringify(obj));
+    return;
+  }
+
+  // --- Prototype view mode: the viewer's fetch-bundle (data/viewer) calls
+  //     :get-view-only-bundle to load the file.  Without a real bundle it hits
+  //     the benign `200 {}` stub below -> nil :file/page -> the viewer raises
+  //     :not-found and renders the "doesn't exist" 404 screen.
+  //     Build the bundle in the headless engine (ONE transit doc so the file
+  //     :data cache refs stay coherent) and inject the team fonts so custom /
+  //     variable fonts render in view mode.
+  if (command === "get-view-only-bundle") {
+    const dir = cfg.design;
+    // Custom font variants (best-effort: a project-less design still yields a
+    // valid bundle with an empty :fonts).
+    let fonts = [];
+    try {
+      const projectRoot = cfg.project ?? (dir ? resolveProjectRoot(dir) : null);
+      if (projectRoot) fonts = fontVariantsForBundle(readFonts(projectRoot));
+    } catch {
+      // No fonts.json / unreadable fonts dir — the bundle is still valid.
+    }
+    // projectName: the design's file name from the manifest (viewer only shows it).
+    let projectName = "Local";
+    try {
+      const m = dir && getStore(dir).manifest.match(/:name\s+"((?:[^"\\]|\\.)*)"/);
+      if (m) projectName = JSON.parse(`"${m[1]}"`);
+    } catch {
+      // Keep the default name.
+    }
+    // teamId mirrors server.mjs TEAM_ID; projectId is a stable synthetic uuid
+    // (pencilpot has no multi-project team concept — the viewer only needs a uuid).
+    const teamId = "0398e5fc-95c9-80d6-8008-29071f0fdaed";
+    const projectId = "0398e5fc-95c9-80d6-8008-29071f0fdaf0";
+    const { transit } = JSON.parse(
+      sessionFor(dir).getViewerBundle(
+        JSON.stringify({ teamId, projectId, projectName, fonts }),
+      ),
+    );
+    res.writeHead(200, {
+      "content-type": "application/transit+json",
+      "x-pencilpot-source": "disk",
+    });
+    res.end(transit);
     return;
   }
 

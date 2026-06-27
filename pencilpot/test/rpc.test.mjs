@@ -203,3 +203,70 @@ test("rename-file persists names with embedded quote and backslash (transit)", a
     assert.equal(status().dirty, true, "design marked dirty after rename");
   }
 });
+
+// ---------------------------------------------------------------------------
+// get-view-only-bundle: the prototype viewer's fetch-bundle. Must return a real
+// transit bundle (file + team + permissions + fonts) so the viewer LOADS instead
+// of hitting the benign `200 {}` unhandled-RPC stub (which yields a nil page ->
+// viewer raises :not-found -> "doesn't exist" 404 screen).
+// ---------------------------------------------------------------------------
+
+test("get-view-only-bundle returns a real transit bundle (not the empty stub)", async () => {
+  const { dir } = seedDir();
+  initWorktree(dir);
+  // Spy console.warn so we can prove the request is HANDLED (no unhandled-RPC warn).
+  const warnings = [];
+  const origWarn = console.warn;
+  console.warn = (...a) => warnings.push(a.join(" "));
+  let res;
+  try {
+    const req = mockReq({
+      method: "GET",
+      url: "/api/main/methods/get-view-only-bundle?file-id=abc&features=foo",
+    });
+    res = mockRes();
+    await handleRpc(req, res, { design: dir });
+  } finally {
+    console.warn = origWarn;
+  }
+
+  assert.equal(res.statusCode, 200, "get-view-only-bundle returns 200");
+  assert.match(
+    res.headers["content-type"] || "",
+    /transit\+json/,
+    "responds transit+json",
+  );
+  // The body is a single transit document carrying the whole bundle.
+  const body = res.body;
+  assert.match(body, /~:file/, "bundle has :file");
+  assert.match(body, /~:pages-index/, "bundle file carries an inline :pages-index");
+  assert.match(body, /~:permissions/, "bundle has :permissions");
+  assert.match(body, /~:can-edit/, "permissions grant :can-edit (local single-user)");
+  assert.match(body, /~:fonts/, "bundle has :fonts (team fonts for view-mode rendering)");
+  // No unhandled-RPC warning fired for this command.
+  assert.ok(
+    !warnings.some((w) => w.includes("unhandled RPC get-view-only-bundle")),
+    `must be handled, not stubbed; warnings: ${JSON.stringify(warnings)}`,
+  );
+});
+
+test("get-view-only-bundle :file :data :pages-index references a real page id", async () => {
+  const { dir } = seedDir();
+  initWorktree(dir);
+  // The page id the file payload actually persisted (independent source).
+  const { meta } = getFile(dir);
+  const dataStr = typeof meta.data === "string" ? meta.data : JSON.stringify(meta.data);
+  const pageId = (dataStr.match(/~:pages-index[^]*?~u([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/) || [])[1];
+  assert.ok(pageId, "fixture has at least one page id");
+
+  const req = mockReq({
+    method: "GET",
+    url: "/api/main/methods/get-view-only-bundle?file-id=abc",
+  });
+  const res = mockRes();
+  await handleRpc(req, res, { design: dir });
+  assert.ok(
+    res.body.includes(pageId),
+    "bundle inlines the real page id under :file :data :pages-index",
+  );
+});
