@@ -38,6 +38,44 @@
 
 (defn- page-id-of [data] (-> data meta ::page-id))
 
+;; pencilpot's frontend is always the modern (components/v2 + wasm) build, so the
+;; served file/team MUST declare the modern feature SET — otherwise the SPA treats
+;; it as a legacy file (active-feature? uses contains?, so a vector checks indices,
+;; not membership) and the options/design panel (and the viewer) render empty.
+(defn- modern-features [features]
+  (into #{"fdata/shape-data-type" "fdata/path-data" "styles/v2"
+          "layout/grid" "components/v2" "plugins/runtime"
+          "design-tokens/v1" "tokens/numeric-input" "variants/v1"
+          "render-wasm/v1" "text-editor/v2" "text-editor-wasm/v1"}
+        (map str (or features []))))
+
+;; Builds the full get-file-shaped :file map (UUID :id, live :data, modern features)
+;; PLUS the JSON `meta` map (string :id).  Shared by getFileResponse and
+;; getViewerBundle so the served file payload can never drift between the two.
+;;   meta-m :id MUST be a STRING (clj->js of a UUID mangles → re-hydrate crash);
+;;   resp   :id MUST be a proper UUID (SPA keys the file by UUID).
+(defn- build-file-resp [file-id features st]
+  (let [data            (:data st)
+        envelope        (:file-envelope st)
+        revn            (get st :revn 0)
+        vern            (get st :vern 0)
+        nm              (get st :name "Pencilpot File")
+        served-features (modern-features features)
+        meta-m          {:id       (str file-id)
+                         :name     nm
+                         :revn     revn
+                         :vern     vern
+                         :features served-features}
+        resp            (if envelope
+                          ;; Full round-trip: restore the original envelope (its :id is already a UUID) + live :data
+                          (-> envelope
+                              (assoc :data data)
+                              (assoc :revn revn)
+                              (assoc :vern vern)
+                              (assoc :features served-features))
+                          (assoc meta-m :data data :id file-id))]
+    {:served-features served-features :meta-m meta-m :resp resp}))
+
 ;; Build + apply + record one :add-obj change (mirrors files.builder/commit-shape).
 (defn- add-shape! [state shape]
   (let [{:keys [page-id frame-id]} @state
@@ -396,41 +434,40 @@
        ;; engine.  Otherwise emits the minimal shape for round-trip/scratch usage.
        ;; Ready for createSession({fromTransit, meta}) or the stock SPA's get-file consumer.
        (fn []
-         (let [data     (:data @state)
-               st       @state
-               envelope (:file-envelope st)
-               revn     (get st :revn 0)
-               vern     (get st :vern 0)
-               nm       (get st :name "Pencilpot File")
-               ;; pencilpot's frontend is always the modern (components/v2 + wasm) build, so the
-               ;; served file MUST declare the modern feature set — otherwise the SPA treats it as
-               ;; a legacy file and the options/design panel renders empty.  Crucially this is a SET
-               ;; (active-feature? uses contains?, which on a vector checks indices, not membership).
-               served-features (into #{"fdata/shape-data-type" "fdata/path-data" "styles/v2"
-                                       "layout/grid" "components/v2" "plugins/runtime"
-                                       "design-tokens/v1" "tokens/numeric-input" "variants/v1"
-                                       "render-wasm/v1" "text-editor/v2" "text-editor-wasm/v1"}
-                                     (map str (or features [])))
-               ;; meta-m is the JSON `meta` (and the source the test re-hydrates from) — :id MUST be
-               ;; a STRING there (clj->js of a UUID serializes to a mangled object → (uuid/uuid obj)
-               ;; → toLowerCase crash on re-hydrate).  The TRANSIT body (`resp`), however, needs :id
-               ;; as a proper UUID so the SPA keys the file by UUID (string id → objects lookup nil →
-               ;; empty design panel).  So: string in meta, UUID in resp.
-               meta-m   {:id       (str file-id)
-                         :name     nm
-                         :revn     revn
-                         :vern     vern
-                         :features served-features}
-               resp     (if envelope
-                          ;; Full round-trip: restore the original envelope (its :id is already a UUID) + live :data
-                          (-> envelope
-                              (assoc :data data)
-                              (assoc :revn revn)
-                              (assoc :vern vern)
-                              (assoc :features served-features))
-                          (assoc meta-m :data data :id file-id))
-               body     (t/encode-str resp)]
+         (let [{:keys [meta-m resp]} (build-file-resp file-id features @state)
+               body (t/encode-str resp)]
            (js/JSON.stringify (clj->js {:meta meta-m :transit body}))))
+       :getViewerBundle
+       ;; Returns JSON: { transit: "<transit-string>" } — the body for the SPA's
+       ;; :get-view-only-bundle RPC.  The WHOLE bundle is transit-encoded in ONE
+       ;; pass so transit's key/value cache (^ refs) stays coherent; NEVER embed a
+       ;; separately-encoded file string (that corrupts the cache).  The :file slot
+       ;; is the SAME map getFileResponse emits (shared build-file-resp).
+       ;; extras-json = {teamId, projectId, projectName, fonts}:
+       ;;   teamId/projectId -> uuid/parse (fallback uuid/zero); projectName -> str;
+       ;;   fonts -> OPAQUE pass-through list of font-variant maps (runtime supplies
+       ;;   the correct shape; `args` already keywordized them).
+       ;; :features is the SAME modern set in BOTH :file and :team (viewer does
+       ;; (features/initialize (:features team)) and keys the file by it).
+       (fn [extras-json]
+         (let [extras   (args extras-json)
+               team-id  (or (some-> (:teamId extras) uuid/parse) uuid/zero)
+               proj-id  (or (some-> (:projectId extras) uuid/parse) uuid/zero)
+               proj-nm  (or (:projectName extras) "Local")
+               fonts    (or (:fonts extras) [])
+               {:keys [served-features resp]} (build-file-resp file-id features @state)
+               bundle   {:project     {:id proj-id :name proj-nm}
+                         :file        resp
+                         :team        {:id team-id :name "Local" :features served-features}
+                         :share-links []
+                         :libraries   []
+                         :users       []
+                         :thumbnails  {}
+                         :permissions {:type :membership :is-owner true :is-admin true
+                                       :can-edit true :can-read true}
+                         :fonts       fonts}
+               body     (t/encode-str bundle)]
+           (js/JSON.stringify (clj->js {:transit body}))))
        :mapFontsToVariable
        ;; Map families onto a variable font WITH per-family axis settings.
        ;; mapping: {"Family Name" {"fontId" "custom-…" "family" "Google Sans Flex"
