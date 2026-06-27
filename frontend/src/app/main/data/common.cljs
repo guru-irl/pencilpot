@@ -477,10 +477,11 @@
                      :section section
                      :frame-id frame-id
                      :index index}
-            params  (d/without-nils params)]
-        ;; pencilpot: open the prototype viewer in the SAME window (single local
-        ;; window; browser Back returns to the workspace) instead of spawning a
-        ;; new window/tab via ::rt/new-window.
+            params  (d/without-nils params)
+            name    (dm/str "viewer-" file-id)
+            options (merge {::rt/new-window true
+                            ::rt/window-name name}
+                           options)]
         (rx/of ::dps/force-persist
                (rt/nav :viewer params options))))))
 
