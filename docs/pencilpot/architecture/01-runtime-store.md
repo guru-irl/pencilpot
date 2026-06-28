@@ -102,10 +102,14 @@ store/
 ```
 RPC command             Handler                                    Source
 ──────────────────────  ─────────────────────────────────────────  ──────────
-get-file                sessionFor(dir) → getFileResponse()        disk
+get-file                readSessionFor(dir) → getFileResponse()    disk    (cached)
 get-file                (with ?id=<libId>) → shared/*.penpot       disk
 update-file             applyTransitUpdate → bumpRevn → writeDesign disk
 get-file-libraries      parseLibraries(manifest) → [getFile(lib)]  disk
+upload-file-media-object        writeMediaObject(multipart) → media/  disk    (→07)
+create-file-media-object-from-url  fetch(url) → writeMediaObject     disk    (→07)
+clone-file-media-object         cloneMediaObject(srcId) → media/     disk    (→07)
+get-view-only-bundle    readSessionFor(dir) → getViewerBundle()    engine  (→11)
 get-profile             stub-data/get-profile.body                 replay
 get-teams               stub-data/get-teams.body                   replay
 get-team-members        stub-data/…                                replay
@@ -119,6 +123,17 @@ get-file-thumbnail      stub-data/…                                replay
 ```
 
 All non-API traffic (static assets) is proxied to `penpot-hl:9101` via `proxy.mjs`. The `globalThis.penpotPublicURI = location.origin` injection in `/js/config.js` forces the SPA to send all RPC calls to `:7777` without any frontend source changes.
+
+> **Phase 4 additions (this table grew since Phase 1).** Read-only reads (`get-file`,
+> `get-view-only-bundle`) now resolve through `readSessionFor(dir)` in `rpc.mjs` — a one-entry cache
+> keyed on the open design's in-memory store identity — so repeated reads skip the ~300 ms
+> re-hydration and the very first read avoids the one-time ~8.5–9.4 s cold `createSession`. The engine
+> is **warmed off the request path at boot** (`warmEngine`, dispatched via `setImmediate` from
+> `server.mjs` after `listen()` + banner). `update-file` still re-hydrates a fresh write session and
+> persists under the manual-save model — see [`08-working-copy-dirty-persistence.md`](08-working-copy-dirty-persistence.md).
+> The media RPCs are detailed in [`07-media-flow.md`](07-media-flow.md); the view bundle in
+> [`11-view-mode.md`](11-view-mode.md); the engine methods (`getFileResponse` / `getViewerBundle`) in
+> [`12-headless-engine-and-ai-dev.md`](12-headless-engine-and-ai-dev.md).
 
 ---
 
