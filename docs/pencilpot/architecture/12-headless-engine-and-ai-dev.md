@@ -100,7 +100,7 @@ stringifies UUIDs via `stringify-uuids`/`->plain-js`). Grouped:
 |---|---|---|
 | **Authoring** | `addBoard` `closeBoard` `addRect` `addEllipse`(`:circle`) `addText` | `mk-shape` → `cts/setup-shape`; `add-shape!` builds+applies+records a `:add-obj`. Parenting is a STACK: `addBoard` pushes the board as active `:frame-id`+parent; `closeBoard` pops. `addText` runs `txt/change-text` and `dissoc`s `:position-data`. |
 | **Layout** | `setFlexLayout` `setGridLayout` `setGrowType` `setConstraints` | (A) `pcb/update-shapes` writes the layout attrs onto the board; (B) reflow children through Penpot's OWN engine — `ctm/reflow-modifiers` seed → `gm/set-objects-modifiers` → `gsh/transform-shape`. Grid builds tracks via `ctl/add-grid-column`/`assign-cells`/`reorder-grid-children`. |
-| **Components** | `createComponent` `instantiateComponent` | `createComponent` promotes an existing board: raw `:add-component` + `:mod-obj` (sets `:component-root`/`:main-instance`/`:component-id`/`:component-file`). `instantiateComponent` calls `cll/generate-instantiate-component` — **GAP on SDK-created mains** (see Gaps). |
+| **Components** | `createComponent` `instantiateComponent` | `createComponent` promotes an existing board: raw `:add-component` + `:mod-obj` (sets `:component-root`/`:main-instance`/`:component-id`/`:component-file`). `instantiateComponent` calls `cll/generate-instantiate-component` over **records + `:data` `:id`-restored** (coerce-for-validation), so it works on hydrated designs too (fix `01cc717d26`). |
 | **Tokens** | `addColorToken` `tokens` | FILE-level `TokensLib`: `pcb/with-library-data` + `set-token-set`/`set-token` + a hidden theme that enables the set (mirrors frontend `create-token-with-set`). `:type :color` only. |
 | **Fonts** | `mapFontsToVariable` `retargetFonts` | whole-`:data` `walk/postwalk`: rewrite `:font-id`/`:font-family`/`:font-variant-id`, merge axis map into `:font-variation-settings`, strip stale `:position-data`. NOT a recorded change → does not round-trip `commit()` (doc `06`; persist via CLI). |
 | **Changes** | `applyChanges` `applyTransitUpdate` `pendingChanges` `clearChanges` `commitBody` `bumpRevn` | `applyTransitUpdate` (canonical) decodes a transit `update-file` body and applies its `:changes` VERBATIM; `commitBody` encodes the accumulated `:changes` into an `update-file` transit body. |
@@ -223,13 +223,16 @@ the cache (read-after-write is fresh). See doc `11` for the cache/warmup.
 
 ## Known GAPs (architecture cause; full matrix in `../ai-dev-capabilities.md`)
 
-- **`instantiateComponent` on SDK-created mains** → `cll/generate-instantiate-component` rejects a freshly
-  promoted component (`"expected valid shape"`). Authoring components works; placing instances does not.
-- **No interaction-authoring verb** anywhere in `session.cljs`/SDK/MCP — prototypes are *played*, not
-  authored headlessly (doc `11`).
 - **Color tokens only** (`addColorToken` wires `:type :color`); no typography/spacing/binding.
 - **`mapFontsToVariable` is a `:data` transform, not a recorded change** → does not round-trip `commit()`;
   persist variable-font remaps with the `pencilpot map-variable` CLI (doc `06`).
+- **Append-only structural authoring** — no reposition/resize/reparent/delete/group beyond layout/grow/constraints.
+
+**Closed (engine follow-ups):** `instantiateComponent` now works on hydrated designs (`01cc717d26`: clone
+over `Shape` records + restored `:data` `:id`, which was `nil` → invalid `:component-file`), and
+**`addInteraction`** authors prototype links headlessly (`5268503075`: builds a schema-valid interaction
+via the `interactions` helpers, appended through `pcb/update-shapes` — no `check-shape`, safe on plain-map
+hydrated shapes). The viewer (doc `11`) plays authored navigates the same as imported ones.
 
 For the full WORKS/PARTIAL/GAP capability matrix, exact opts, env vars, and copy-pasteable invocations see
 **`../ai-dev-capabilities.md`** and the **`pencilpot/skills/pencilpot/SKILL.md`** skill.

@@ -61,7 +61,7 @@ An AI dev loop MUST save explicitly, or the edit is lost on restart/discard. Pol
 | `setGrowType(id,mode)` | WORKS | `auto-width\|auto-height\|fixed` (text/layout attr; inert on plain rects) |
 | `setConstraints(id,{h,v})` | WORKS | h:left\|right\|leftright\|center\|scale; v:top\|bottom\|topbottom\|center\|scale |
 | `createComponent(boardId,{name?})` | WORKS | promotes a BOARD into a main component |
-| `instantiateComponent(componentId,{x,y})` | **GAP** | throws `"expected valid shape"` on SDK-created components (engine `generate-instantiate-component`) |
+| `instantiateComponent(componentId,{x,y})` | WORKS | places a copy of a main component (carries `:shape-ref`/`:component-*`); fixed for hydrated designs in `01cc717d26` |
 
 ### Design-system assets
 | Surface | Status | Notes |
@@ -78,7 +78,8 @@ An AI dev loop MUST save explicitly, or the edit is lost on restart/discard. Pol
 ### Prototypes / viewer
 | Surface | Status | Notes |
 |---|---|---|
-| Interaction AUTHORING (SDK/MCP) | **GAP** | no `addInteraction`/`connect`/`:interactions` write verb anywhere |
+| `addInteraction({shapeId,destination,eventType?,actionType?,preserveScroll?})` | WORKS | authors a prototype link (default click→navigate); appends to the shape's `:interactions`; commit `5268503075` |
+| Interaction AUTHORING (SDK/MCP) | WORKS | `wc.addInteraction(...)` / MCP `script`; navigate + overlay/url/prev-screen action types |
 | Prototype VIEWING / PLAYING (`/view`) | WORKS | `get-view-only-bundle` 200; viewer renders; a real hotspot click navigates frames |
 
 ### Lifecycle / persistence
@@ -92,12 +93,12 @@ An AI dev loop MUST save explicitly, or the edit is lost on restart/discard. Pol
 ---
 
 ## 3. Confirmed GAPs (what an AI cannot do today) + workarounds
-1. **`instantiateComponent`** fails on SDK-created components → can define components but not place instances via SDK. *Workaround:* author instances in the Penpot UI, or pre-instantiate in the source `.penpot`. *Fix:* engine follow-up (`generate-instantiate-component` rejects a freshly-made main).
-2. **Prototype interactions** cannot be authored (no verb) → build frames in code, but wire interactions in the UI or pre-author them in the imported design (pencilpot then plays them faithfully). *Fix:* an engine `update-shapes :interactions` verb.
-3. **Only color tokens**; no typography/spacing/binding/themes.
-4. **Append-only structural authoring**: no reposition/resize/reparent/delete/group verbs beyond layout/grow/constraints.
-5. **Variant / component-swap** authoring: none.
-6. **`mapFontsToVariable` doesn't round-trip `commit()`** → persist variable-font remaps with the CLI.
+1. **Only color tokens**; no typography/spacing/binding/themes.
+2. **Append-only structural authoring**: no reposition/resize/reparent/delete/group verbs beyond layout/grow/constraints.
+3. **Variant / component-swap** authoring: none.
+4. **`mapFontsToVariable` doesn't round-trip `commit()`** → persist variable-font remaps with the CLI.
+
+> **Closed since the first audit:** `instantiateComponent` (now works on hydrated designs — `01cc717d26`) and **prototype interaction authoring** (`wc.addInteraction` — `5268503075`). Both are verified end-to-end (author/place → commit → save → cold reopen persists; viewer plays authored navigates).
 
 ---
 

@@ -54,6 +54,8 @@ POST http://localhost:<port>/pencilpot/discard              # drop staged edits 
 | `wc.setGrowType(id, "auto-width"\|"auto-height"\|"fixed")` | text/layout grow |
 | `wc.setConstraints(id,{h,v})` | h:left\|right\|leftright\|center\|scale; v:top\|bottom\|topbottom\|center\|scale |
 | `wc.createComponent(boardId,{name?})` | promotes a board into a main component |
+| `wc.instantiateComponent(componentId,{x,y})` | places a copy of a main component |
+| `wc.addInteraction({shapeId,destination,eventType?,actionType?,preserveScroll?})` | wires a prototype link (default click→navigate) |
 | `wc.addColorToken({set,name,value})` / `wc.tokens()` | color token (name uses `.` for groups, `/` invalid) |
 | `wc.serializeStore()` / `wc.validate()` / `wc.pendingChanges()` / `wc.tokens()` | introspection (the MCP `scene()` tool returns the id→shape map) |
 
@@ -73,16 +75,16 @@ pencilpot retarget-fonts <project.pencil> --family "Name=fontId"   # consolidate
 
 ## Prototypes
 
-You can build frames/shapes/components in code, but **interactions cannot be authored** via SDK/MCP
-(see GAPs). Pencilpot **plays** prototypes that already exist (imported or UI-authored): the play button
-opens `/view` in a separate window; `get-view-only-bundle` feeds the native viewer; hotspot clicks navigate frames.
+You can build frames/shapes/components AND wire interactions in code. `wc.addInteraction({shapeId,
+destination})` appends a click→navigate link to a shape's `:interactions` (also `eventType`/`actionType`
+for overlay/url/prev-screen). Pencilpot then **plays** the prototype — imported, UI-authored, OR
+yours: the play button opens `/view` in a separate window; `get-view-only-bundle` feeds the native
+viewer; hotspot clicks navigate frames.
 
 ## GAPs — do NOT attempt these via SDK/MCP (they fail or don't exist)
 
 | Want | Reality | Do instead |
 |---|---|---|
-| Place a component instance | `wc.instantiateComponent` throws `"expected valid shape"` on SDK-created components | author instances in the Penpot UI, or pre-instantiate in the source `.penpot` |
-| Wire a prototype interaction | no authoring verb exists | author in the UI / pre-author in the imported design; pencilpot then plays it |
 | Typography/spacing/dimension tokens, token→shape binding | only `:color` tokens are wired | UI for other token types |
 | Move/resize/reparent/delete/group an existing shape | append-only authoring (only layout/grow/constraints mod existing shapes) | UI for structural edits |
 | Component variants/swap | no surface | UI |

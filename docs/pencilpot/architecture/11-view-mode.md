@@ -232,8 +232,9 @@ browser connects (deferring to a worker thread would not share the main V8 JIT c
 
 In: loading + rendering the prototype (first frame + frame navigation via `:interactions`), custom/variable fonts,
 full local permissions. Out: comment threads, share links, multi-user, and interaction fidelity beyond loading +
-rendering. Prototype **authoring** (writing `:interactions`) is a separate, currently-unfilled gap — see
-`../ai-dev-capabilities.md` (the viewer *plays* interactions that already exist; nothing authors them headlessly).
+rendering. Prototype **authoring** (writing `:interactions`) is handled headlessly by the engine's
+`addInteraction` verb (doc `12`) — the viewer here *plays* interactions whether they were imported,
+UI-authored, or written via `wc.addInteraction` (see `../ai-dev-capabilities.md`).
 
 ---
 

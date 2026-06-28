@@ -24,7 +24,7 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   TEAM, FID, REPO, SCRATCH, designPresent, copyDesign, spawnRuntime,
-  loadWorkingCopy, kill, makeChecks,
+  loadWorkingCopy, kill, makeChecks, save, status, readPageEdns,
 } from "./_boot.mjs";
 
 const CHROME_ARGS = ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"];
@@ -82,16 +82,14 @@ try {
   const dir = copyDesign("b3proto");
 
   // ─────────────────────────────────────────────────────────────────────────
-  // (1) AUTHORING AUDIT — confirm there is NO interaction-authoring verb
+  // (1) AUTHORING — wc.addInteraction wires a prototype link (commit 5268503075)
   // ─────────────────────────────────────────────────────────────────────────
   const sessionSrc = fs.readFileSync(SESSION_CLJS, "utf8");
-  const interactionVerbRe = /(addInteraction|setInteraction|addFlow|setFlow|connectFrame|addHotspot|addOverlay|setInteractions)/i;
-  // (a) the engine SOURCE contains no interaction-authoring identifier at all.
-  const srcHasInteractionVerb = interactionVerbRe.test(sessionSrc) || /:interactions/.test(sessionSrc);
-  check(!srcHasInteractionVerb, `headless/session.cljs source contains NO interaction-authoring identifier (no addInteraction/addFlow/:interactions write)`);
+  // the engine now exposes :addInteraction and writes the shape's :interactions vector
+  check(/:addInteraction/.test(sessionSrc) && /:interactions/.test(sessionSrc),
+    `headless/session.cljs exposes :addInteraction and writes :interactions`);
 
-  // (b) the WorkingCopy SDK = the public surface the MCP `script` tool wraps. Enumerate it
-  //     (load bound to the runtime base). It exposes shapes/layout/components/tokens/fonts only.
+  // the WorkingCopy SDK = the public surface the MCP `script` tool wraps. Enumerate it.
   const r0 = await spawnRuntime(dir);
   srv = r0.proc;
   const base = r0.base;
@@ -102,12 +100,35 @@ try {
     ...Object.getOwnPropertyNames(wc.session ? Object.getPrototypeOf(wc.session) : {}),
   ])].filter((k) => k !== "constructor" && typeof (wc[k] ?? wc.session?.[k]) === "function").sort();
   finding.exported = sdkMethods;
-  const sdkHasInteraction = sdkMethods.some((k) => interactionVerbRe.test(k));
   check(sdkMethods.includes("addRect") && sdkMethods.includes("createComponent"),
     `(sanity) SDK method surface enumerated (addRect + createComponent present; ${sdkMethods.length} methods)`);
-  check(!sdkHasInteraction && typeof wc.addInteraction === "undefined" && typeof wc.connect === "undefined",
-    `WorkingCopy SDK / MCP script-tool surface has NO interaction-authoring verb (authoring is impossible via SDK/MCP)`);
-  finding.authoringGap = true;
+  check(typeof wc.addInteraction === "function",
+    `WorkingCopy SDK exposes addInteraction (the prototype-authoring verb)`);
+
+  // author a click→navigate link between two fresh frames
+  const homeId = wc.addBoard({ x: 5000, y: 100, width: 300, height: 200, name: "AUDIT Home" });
+  wc.closeBoard();
+  const detailsId = wc.addBoard({ x: 5400, y: 100, width: 300, height: 200, name: "AUDIT Details" });
+  wc.closeBoard();
+  const inter = wc.addInteraction({ shapeId: homeId, destination: detailsId });
+  check((inter["event-type"] ?? inter.eventType) === "click" &&
+        (inter["action-type"] ?? inter.actionType) === "navigate" &&
+        inter.destination === detailsId,
+    `authored a click→navigate interaction (dest=${detailsId})`);
+  check(wc.newValidationErrors().length === 0,
+    `authored interaction introduces no validation errors: ${JSON.stringify(wc.newValidationErrors())}`);
+
+  await wc.commit();
+  await save(base);
+  check((await status(base)).dirty === false, `authored interaction committed + saved (dirty=false)`);
+
+  // cold-read the on-disk page EDN: the interaction persisted durably
+  const allPageEdn = readPageEdns(dir);
+  const authoredPersisted = allPageEdn.includes(detailsId) &&
+    /:interactions/.test(allPageEdn) && allPageEdn.includes("AUDIT Home");
+  check(authoredPersisted, `authored interaction persisted to the on-disk page EDN (durable)`);
+  finding.authoringWorks = true;
+  finding.authoredDest = detailsId;
 
   // ─────────────────────────────────────────────────────────────────────────
   // (2) CONSUMPTION — the STABLE SVG viewer plays the imported prototype
@@ -215,32 +236,28 @@ page \`${d.pageId}\` (${d.hotspotCount} click→navigate hotspot shapes).
 ## Verdict
 | Surface | Status | Notes |
 |---|---|---|
-| Interaction **authoring** (SDK/MCP) | **GAP** | the headless method table exposes no interaction verb at all |
+| Interaction **authoring** (SDK/MCP) | **WORKS** | \`wc.addInteraction({shapeId,destination})\` wires a click→navigate link; committed + saved + persisted to page EDN (commit \`5268503075\`) |
 | Interaction / prototype **viewing & playing** (\`/view\`) | **WORKS** | bundle served, frame rendered, a hotspot click navigated (index ${d.navFrom} → ${d.navTo}) |
 
-## AUTHORING = GAP (the exact missing surface)
-The headless engine (\`headless-core/src/app/headless/session.cljs\`) and the \`WorkingCopy\` SDK that
-wraps it — the same surface the MCP \`script\` tool exposes — provide exactly these methods:
+## AUTHORING = WORKS (the verb)
+The headless engine (\`headless-core/src/app/headless/session.cljs\`) exposes \`:addInteraction\`, surfaced
+on the \`WorkingCopy\` SDK (\`wc.addInteraction\`) and reachable through the MCP \`script\` tool. The full
+SDK method surface:
 \`\`\`
 ${(d.exported || []).join("  ")}
 \`\`\`
-None authors prototype interactions. There is **no** \`addInteraction\` / \`setInteraction\` /
-\`addFlow\` / \`connect\` / \`addOverlay\` / hotspot verb, the engine source contains no \`:interactions\`
-write, and the \`WorkingCopy\` SDK object exposes none either (\`typeof wc.addInteraction === "undefined"\`).
-
-**What a user would need (and cannot do today):** set an \`:interactions\` vector on a shape, e.g.
+Authoring sets the origin shape's \`:interactions\` vector via \`pcb/update-shapes\` (no \`check-shape\`, so it
+is safe on hydrated plain-map shapes), e.g.
 \`\`\`clojure
 :interactions [{:action-type :navigate          ; or :open-overlay / :close-overlay / :open-url / :prev-screen
                 :event-type  :click              ; or :mouse-enter / :mouse-leave / :after-delay
                 :destination #uuid "<frame-id>"  ; target board
-                :animation   {:animation-type :dissolve :duration 220 :easing :ease-out}
                 :preserve-scroll false}]
 \`\`\`
-(shape schema: \`app.common.types.shape.interactions\`). To close the gap an engine method would
-\`update-shapes\` the origin shape's \`:interactions\` (validated by \`ctsi/check-interaction!\`).
-**Recommended engine follow-up task.** So: an AI can build the *frames* (boards/shapes/components)
-but cannot *wire the prototype* — interactions must be authored in the Penpot UI (or pre-exist in
-an imported design) and pencilpot then renders/plays them faithfully.
+(shape schema: \`app.common.types.shape.interactions\`; the verb builds it via the interactions helpers
+so it is \`ctsi/check-interaction!\`-valid). So an AI can build the *frames* (boards/shapes/components)
+**and** wire the *prototype* in code; pencilpot then renders/plays the authored interactions faithfully
+— the same path as imported or UI-authored ones.
 
 ## VIEWING / PLAYING = WORKS (what was proven)
 - \`get-view-only-bundle\` served **200** to the STABLE SVG viewer and the bundle transit carries the
