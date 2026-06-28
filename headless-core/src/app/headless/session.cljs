@@ -16,6 +16,7 @@
    [app.common.files.validate :as cfv]           ; validate-file-schema! (parity oracle)
    [app.common.types.file :as ctf]               ; make-file-data
    [app.common.types.tokens-lib :as ctob]        ; design tokens (sets/tokens/themes)
+   [app.common.types.token :as cto]              ; token-types + apply/unapply-token-to-shape
    [app.common.transit :as t]                    ; decode-str / encode-str (wire + record handlers)
    [app.common.uuid :as uuid]
    [app.common.geom.matrix]                       ; side-effect: transit handler
@@ -323,6 +324,75 @@
                              (pcb/set-active-token-themes #{ctob/hidden-theme-path}))]
            (apply-changes! state changes)
            (str (:id token))))
+       :addToken
+       ;; FILE-level design token of ANY type (color, dimension, spacing, sizing,
+       ;; border-radius, opacity, rotation, font-size, number, typography, …).
+       ;; Generalizes addColorToken. opts: {set?, name, type?="color", value}.
+       ;; Same library wiring (set + hidden theme + activate) so it resolves.
+       ;; ctob/make-token validates the value per type; invalid type fails fast.
+       (fn [json]
+         (let [{:keys [set name type value]} (args json)
+               tkw      (keyword (or type "color"))
+               _        (when-not (contains? cto/token-types tkw)
+                          (throw (ex-info (str "addToken: invalid type " (pr-str (or type "color"))
+                                               "; valid: " (pr-str cto/token-types)) {})))
+               set-name (or set "Global")
+               data     (:data @state)
+               lib      (:tokens-lib data)
+               existing (some-> lib (ctob/get-set-by-name set-name))
+               token-set (or existing (ctob/make-token-set :name set-name))
+               set-id    (ctob/get-id token-set)
+               token     (ctob/make-token :name name :type tkw :value value)
+               hidden    (ctob/make-hidden-theme)
+               hidden+   (ctob/enable-set hidden set-name)
+               changes   (-> (pcb/empty-changes nil)
+                             (pcb/with-library-data data)
+                             (pcb/set-token-set set-id token-set)
+                             (pcb/set-token set-id (:id token) token)
+                             (pcb/set-token-theme (ctob/get-id hidden) hidden+)
+                             (pcb/set-active-token-themes #{ctob/hidden-theme-path}))]
+           (apply-changes! state changes)
+           (str (:id token))))
+       :applyToken
+       ;; Bind an existing token (by name) to attributes of a shape, writing the
+       ;; shape's :applied-tokens. opts: {token, attributes:[…]} where attributes
+       ;; are shape token-attr keywords (:fill :stroke-color :width :height
+       ;; :rotation :opacity :r1..:r4 :p1..:p4 …). The value resolves when the
+       ;; design is opened with the tokens runtime; here we record the binding.
+       (fn [shape-id json]
+         (let [{:keys [token attributes]} (args json)
+               pid     (:page-id @state)
+               objects (objects-of state)
+               sid     (uuid/parse shape-id)
+               lib     (:tokens-lib (:data @state))
+               tok     (some->> (when lib (ctob/get-all-tokens lib))
+                                (filter #(= token (:name %)))
+                                first)
+               _       (when (nil? tok)
+                         (throw (ex-info (str "applyToken: no token named " (pr-str token)) {})))
+               attrs   (set (map keyword attributes))
+               ch      (-> (pcb/empty-changes nil pid)
+                           (pcb/with-page-id pid)
+                           (pcb/with-objects objects)
+                           (pcb/update-shapes [sid]
+                                              (fn [s] (cto/apply-token-to-shape {:shape s :token tok :attributes attrs}))))]
+           (apply-changes! state ch)
+           js/undefined))
+       :unapplyToken
+       ;; Remove any token bound to the given attributes of a shape.
+       (fn [shape-id json]
+         (let [{:keys [attributes]} (args json)
+               pid     (:page-id @state)
+               objects (objects-of state)
+               sid     (uuid/parse shape-id)
+               attrs   (set (map keyword attributes))
+               ch      (-> (pcb/empty-changes nil pid)
+                           (pcb/with-page-id pid)
+                           (pcb/with-objects objects)
+                           (pcb/update-shapes [sid]
+                                              (fn [s] (cto/unapply-tokens-from-shape s attrs))))]
+           (apply-changes! state ch)
+           js/undefined))
        :tokens
        (fn []
          ;; Read the file-level TokensLib back into a JSON summary.

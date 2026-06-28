@@ -69,6 +69,11 @@ export class WorkingCopy {
   serializeStore()            { return JSON.parse(this.session.serializeStore()); }
 
   addColorToken(opts) { return this.session.addColorToken(JSON.stringify(opts)); }
+  // Design token of ANY type: { set?, name, type?="color", value }.
+  addToken(opts) { return this.session.addToken(JSON.stringify(opts)); }
+  // Bind an existing token (by name) to shape attributes: applyToken(id, { token, attributes:[…] }).
+  applyToken(id, opts) { return this.session.applyToken(id, JSON.stringify(opts)); }
+  unapplyToken(id, attributes) { return this.session.unapplyToken(id, JSON.stringify({ attributes })); }
   tokens() { return JSON.parse(this.session.tokens()); }
 
   getFileResponse() { return JSON.parse(this.session.getFileResponse()); }
