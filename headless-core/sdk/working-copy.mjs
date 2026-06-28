@@ -36,6 +36,12 @@ export class WorkingCopy {
   createComponent(boardId, opts = {}) { return this.session.createComponent(boardId, JSON.stringify(opts)); }
   instantiateComponent(componentId, opts) { return this.session.instantiateComponent(componentId, JSON.stringify(opts)); }
 
+  // Add a prototype interaction to a shape. opts:
+  //   { shapeId, destination?, eventType?="click", actionType?="navigate", preserveScroll? }
+  // The common case is a click->navigate: addInteraction({ shapeId, destination: <frameId> }).
+  // Returns the created interaction map.
+  addInteraction(opts) { return JSON.parse(this.session.addInteraction(JSON.stringify(opts))); }
+
   // Map families onto a variable font WITH per-family axis settings (wdth/opsz/…).
   // mapping: { "Family Name": { fontId, family, axes: { wdth: 62.5, opsz: 120 } } }.
   // NOTE: this is a whole-file :data transform (not a recorded change), so it does

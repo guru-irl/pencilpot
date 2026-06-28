@@ -7,6 +7,7 @@
    [app.common.logic.libraries :as cll]          ; generate-instantiate-component
    [app.common.geom.point :as gpt]               ; gpt/point (instance position)
    [app.common.types.shape.layout :as ctl]       ; grid cells (add-grid-column/assign-cells/reorder)
+   [app.common.types.shape.interactions :as csi] ; prototype interactions (navigate/overlay)
    [app.common.geom.modifiers :as gm]            ; set-objects-modifiers (layout engine)
    [app.common.types.modifiers :as ctm]          ; reflow-modifiers (seed)
    [app.common.geom.shapes :as gsh]              ; transform-shape (apply modifiers)
@@ -383,6 +384,38 @@
                 (gpt/point (or x 0) (or y 0)) page libraries)]
            (apply-changes! state changes)
            (str (:id new-shape))))
+       :addInteraction
+       ;; Add a prototype interaction to a shape (closes the interaction-authoring
+       ;; gap). opts: {shapeId, destination?, eventType?="click",
+       ;; actionType?="navigate", preserveScroll?}. Builds a schema-valid
+       ;; interaction via the interactions helpers and appends it to the shape's
+       ;; :interactions vector (a :mod-obj change via pcb/update-shapes, which —
+       ;; unlike pcb/add-object — does not run cts/check-shape, so it is safe on
+       ;; hydrated plain-map shapes). Returns the interaction as JSON.
+       (fn [json]
+         (let [{:keys [shapeId destination eventType actionType preserveScroll]} (args json)
+               sid     (uuid/parse shapeId)
+               pid     (:page-id @state)
+               objects (objects-of state)
+               shape   (get objects sid)
+               dest-id (when destination (uuid/parse destination))
+               et      (keyword (or eventType "click"))
+               at      (keyword (or actionType "navigate"))
+               base    (-> csi/default-interaction
+                           (csi/set-event-type et shape)
+                           (csi/set-action-type at))
+               inter   (cond-> base
+                         (and (csi/has-destination base) (some? dest-id))
+                         (csi/set-destination dest-id)
+                         (and (csi/has-preserve-scroll base) (some? preserveScroll))
+                         (csi/set-preserve-scroll (boolean preserveScroll)))
+               ch      (-> (pcb/empty-changes nil pid)
+                           (pcb/with-page-id pid)
+                           (pcb/with-objects objects)
+                           (pcb/update-shapes [sid]
+                                              (fn [s] (update s :interactions csi/add-interaction inter))))]
+           (apply-changes! state ch)
+           (js/JSON.stringify (->plain-js inter))))
        :objects  (fn [] (js/JSON.stringify (->plain-js (get-in (:data @state) [:pages-index (:page-id @state) :objects]))))
        :getShape (fn [id] (js/JSON.stringify (->plain-js (get-in (:data @state) [:pages-index (:page-id @state) :objects (uuid/uuid id)]))))
        :validate (fn []
