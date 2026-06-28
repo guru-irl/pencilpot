@@ -914,6 +914,25 @@
                            node))
                        node))
                    node))]
+           ;; (1) Record per-page shape changes so commit() / the MCP map_fonts_variable
+           ;;     tool persist the remap (the round-trip fix). update-shapes records a
+           ;;     :mod-obj per shape whose postwalk output differs (font attrs +
+           ;;     :position-data strip). Plain-map safe (no cts/check-shape).
+           (doseq [pid (keys (get-in @state [:data :pages-index]))]
+             (let [objects (get-in @state [:data :pages-index pid :objects])
+                   ids     (filterv #(not= (get objects %)
+                                           (walk/postwalk transform-node (get objects %)))
+                                    (keys objects))]
+               (when (seq ids)
+                 (let [ch (-> (pcb/empty-changes nil pid)
+                              (pcb/with-page-id pid)
+                              (pcb/with-objects objects)
+                              (pcb/update-shapes ids (fn [s] (walk/postwalk transform-node s))))]
+                   (apply-changes! state ch)))))
+           ;; (2) Transform the remaining file-level data (typographies, components, …)
+           ;;     for full CLI parity. Idempotent on the page shapes already transformed
+           ;;     in (1): their :font-family is now the variable family (not a mapping
+           ;;     key) and :position-data is already stripped, so re-walking is a no-op.
            (swap! state update :data (fn [d] (walk/postwalk transform-node d)))
            js/undefined))
        :retargetFonts

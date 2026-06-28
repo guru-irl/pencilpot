@@ -236,3 +236,30 @@ test("retargetFonts leaves non-matching families untouched", () => {
     "non-matching family must not be touched");
   assert.deepEqual(JSON.parse(s.validate()), []);
 });
+
+test("mapFontsToVariable records changes so commit() round-trips (gap fix)", () => {
+  const s = createSession(JSON.stringify({ empty: true }));
+  const id = s.addText(JSON.stringify({
+    x: 0, y: 0, width: 200, height: 30, characters: "VF please", fontId: "OldFam",
+  }));
+  s.clearChanges();
+  assert.equal(JSON.parse(s.pendingChanges()).length, 0, "no pending changes before mapping");
+
+  s.mapFontsToVariable(JSON.stringify({
+    OldFam: { fontId: "var-id", family: "VarFam", axes: { wdth: 75, opsz: 36 } },
+  }));
+
+  // (a) the text run was actually remapped onto the variable font (font lives in :content)
+  const content = JSON.stringify(JSON.parse(s.objects())[id].content);
+  assert.ok(content.includes('"font-family":"VarFam"'), "content font-family remapped");
+  assert.ok(content.includes('"font-id":"var-id"'), "content font-id remapped");
+  assert.ok(content.includes('"wdth":75'), "axes merged into font-variation-settings");
+  // (b) THE FIX: the remap is now a RECORDED change, so commit()/MCP persist it
+  // (before the fix this was a direct (swap! :data) and pendingChanges stayed 0).
+  assert.ok(JSON.parse(s.pendingChanges()).length > 0, "mapping recorded pending changes (round-trip)");
+  // (c) store round-trip preserves the remap and stays valid
+  const s2 = createSession(JSON.stringify({ fromStore: JSON.parse(s.serializeStore()) }));
+  assert.ok(JSON.stringify(JSON.parse(s2.objects())[id].content).includes('"font-family":"VarFam"'),
+    "remap persists across round-trip");
+  assert.deepEqual(JSON.parse(s2.validate()), [], "valid after remap");
+});
