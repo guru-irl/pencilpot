@@ -39,17 +39,20 @@ export function createHeadlessMcp({ token, base } = {}) {
       return text({ mappedFamilies: Object.keys(mapping), validation: w.validate(), note: "applied to working copy :data; persist via `pencilpot map-variable` CLI" }); });
 
   server.registerTool("validate",
-    { description: "Validate the working copy with Penpot's own validator (empty array = valid).", inputSchema: {} },
+    { description: "Validate the working copy with Penpot's own validator. Returns the full error array (empty = valid). NOTE: an IMPORTED design may carry PRE-EXISTING issues that render fine but trip the strict whole-file schema; commit() only blocks on errors YOUR edits INTRODUCE (see the commit tool's `introduced` vs `preExisting`).", inputSchema: {} },
     async () => text(need().validate()));
 
   server.registerTool("status",
-    { description: "Pending (uncommitted) change count + current revn.", inputSchema: {} },
-    async () => { const w = need(); return text({ pending: w.pendingChanges().length, revn: w.revn }); });
+    { description: "Pending (uncommitted) change count, current revn, and the count of pre-existing (baseline) validation issues that will NOT block commit.", inputSchema: {} },
+    async () => { const w = need(); return text({ pending: w.pendingChanges().length, revn: w.revn, preExistingValidationIssues: (w.baselineErrs ?? []).length }); });
 
   server.registerTool("commit",
-    { description: "Persist accumulated edits to the file via update-file.", inputSchema: {} },
-    async () => { const w = need(); const errs = w.validate(); if (errs.length) return text({ error: "invalid; not committed", errs });
-      const res = await w.commit(); return text({ committed: true, revn: res.revn + 1 }); });
+    { description: "Persist accumulated edits via update-file. Blocks ONLY if your edits INTRODUCE new validation errors; pre-existing issues from an imported design do not block.", inputSchema: {} },
+    async () => { const w = need();
+      const introduced = w.newValidationErrors();
+      const preExisting = (w.baselineErrs ?? []).length;
+      if (introduced.length) return text({ error: "edits introduce invalidity; not committed", introduced, preExisting });
+      const res = await w.commit(); return text({ committed: true, revn: res.revn + 1, preExisting }); });
 
   server.registerTool("discard",
     { description: "Discard the working copy (re-checkout to start over).", inputSchema: {} },

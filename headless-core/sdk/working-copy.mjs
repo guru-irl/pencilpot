@@ -2,6 +2,11 @@ import { randomUUID } from "node:crypto";
 import { createSession } from "../target/headless/penpot.js";
 import { getFile, updateFile } from "./rpc.mjs";
 
+// Stable key for a validation-error entry so the baseline diff compares by VALUE,
+// not identity — robust whether the validator yields strings (the engine's generic
+// "invalid file data" hint) or richer objects.
+const errKey = (e) => (typeof e === "string" ? e : JSON.stringify(e));
+
 export class WorkingCopy {
   constructor(fileId, token) { this.fileId = fileId; this.token = token; }
 
@@ -9,6 +14,12 @@ export class WorkingCopy {
     const f = await getFile(this.fileId, this.token);
     this.revn = f.revn; this.vern = f.vern; this.features = f.features;
     this.session = createSession(JSON.stringify({ dataTransit: f.dataTransit, fileId: this.fileId, features: f.features }));
+    // Snapshot the pre-edit validation state. An IMPORTED design may carry
+    // pre-existing strict-schema nonconformities (a non-nil :tokens-lib needing a
+    // TokensLib instance, variable-font :font-variation-settings, …) that render
+    // fine but trip the whole-file validator. The AI's edits did not introduce
+    // those, so commit() must not block on them — only on errors the edit ADDS.
+    this.baselineErrs = this.validate();
     return this;
   }
 
@@ -41,9 +52,19 @@ export class WorkingCopy {
   validate() { return JSON.parse(this.session.validate()); }
   pendingChanges() { return JSON.parse(this.session.pendingChanges()); }
 
+  /** Validation errors INTRODUCED since checkout: the current validate() output
+   *  minus the pre-edit baseline. Empty means the edits broke nothing new
+   *  (pre-existing imported-file issues are excluded). This is what gates commit(). */
+  newValidationErrors() {
+    const baseline = new Set((this.baselineErrs ?? []).map(errKey));
+    return this.validate().filter((e) => !baseline.has(errKey(e)));
+  }
+
   async commit({ retries = 1 } = {}) {
-    const errs = this.validate();
-    if (errs.length) throw new Error(`refusing to commit invalid file: ${errs.join("; ")}`);
+    const introduced = this.newValidationErrors();
+    if (introduced.length) {
+      throw new Error(`refusing to commit changes that INTRODUCE invalidity: ${introduced.map(errKey).join("; ")}`);
+    }
     const body = this.session.commitBody(JSON.stringify({ sessionId: randomUUID(), revn: this.revn, vern: this.vern }));
     try {
       const res = await updateFile(body, this.token);

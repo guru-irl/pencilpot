@@ -12,14 +12,17 @@
 //     scene()        -> object map
 //     script(...)    -> addBoard + nested addRect + closeBoard (engine UUIDs, pending>=2)
 //     status()       -> pending change count
-//     validate()     -> RUNS, but currently reports ["invalid file data"] (FINDING #2)
-//     commit()       -> currently GATED: the MCP commit tool refuses while validate is
-//                       non-empty. The runtime's get-file transit hydrates into :data
-//                       that fails common.files.validate/check-file-data — this also
-//                       reproduces on a fresh empty `pencilpot new` starter, so it gates
-//                       EVERY commit. The underlying transport is NOT the problem.
+//     validate()     -> RUNS; on the imported DefaultLauncher it reports the generic
+//                       ["invalid file data"] hint (pre-existing tokens-lib + variable-
+//                       font nonconformities that render fine but trip the strict
+//                       whole-file schema). Fresh `pencilpot new` designs validate [].
+//     commit()       -> SUCCEEDS: the baseline-diff gate (A-FIX2) snapshots the pre-edit
+//                       validation at checkout and blocks only on errors the EDIT
+//                       INTRODUCES, so pre-existing imported-file issues no longer gate
+//                       an otherwise-clean commit (reports preExisting count). The
+//                       hydration root cause was fixed earlier (A-FIX, 9494abe2ae).
 //
-//   PHASE B — update-file transport + save lifecycle (validate gate bypassed):
+//   PHASE B — update-file transport + save lifecycle (low-level, gate-independent):
 //     checkout -> edit -> commitBody -> POST /api/rpc/command/update-file (HTTP 200,
 //     revn bumps) -> edit VISIBLE in a direct get-file -> runtime status DIRTY (staged,
 //     not on disk: the SAVE GAP) -> POST /pencilpot/save -> on-disk page EDN now carries
@@ -101,14 +104,16 @@ try {
   const val = callJson(await client.callTool({ name: "validate", arguments: {} }));
   check(Array.isArray(val), `[MCP] validate runs and returns an array (issues=${Array.isArray(val) ? val.length : "n/a"})`);
 
-  // Finding #2 is now FIXED for the hydration bug: fresh / AI-authored designs
-  // validate clean and commit() works end to end (see commit-roundtrip.mjs).
-  // DefaultLauncher is an IMPORTED design that still carries PRE-EXISTING strict-
-  // schema nonconformities (a real tokens-lib instance + 2 variable-font axis
-  // nodes) the whole-file validate flags, so the commit gate still holds HERE.
+  // Finding #2 is FIXED end to end: the baseline-diff commit gate (A-FIX2) lets
+  // commit() SUCCEED on an IMPORTED design. DefaultLauncher carries PRE-EXISTING
+  // strict-schema nonconformities (a real tokens-lib instance + variable-font axis
+  // nodes) that render fine; the gate excludes them and blocks only edit-INTRODUCED
+  // errors, so the AI's clean board+rect commits cleanly via the real MCP stdio path.
   const cm = callJson(await client.callTool({ name: "commit", arguments: {} }));
-  check(cm.error && Array.isArray(cm.errs) && cm.errs.join(" ").includes("invalid file data"),
-    `[MCP] commit gate still holds on the IMPORTED DefaultLauncher (pre-existing tokens-lib + variable-font nonconformities; fresh designs commit clean): errs=${JSON.stringify(cm.errs)}`);
+  check(cm.committed === true && typeof cm.revn === "number",
+    `[MCP] commit() SUCCEEDS on the imported DefaultLauncher via the real MCP stdio path (revn=${cm.revn})`);
+  check((cm.preExisting ?? 0) >= 1,
+    `[MCP] the baseline-diff gate excluded pre-existing imported-file issues (preExisting=${cm.preExisting}) instead of blocking the commit`);
 
   await client.close(); client = null;
 
@@ -117,6 +122,9 @@ try {
   // gate, to prove the integration spine and the explicit-save lifecycle end to end.
   const WorkingCopy = await loadWorkingCopy(runtime.base);
   const wc = await new WorkingCopy(FID, "local").checkout();
+  // PHASE A's successful commit already staged a board and bumped the runtime revn,
+  // so derive PHASE B's expectations RELATIVE to this checkout (no hardcoded revn).
+  const revnB = wc.revn;
   const b = wc.addBoard({ x: 400, y: 400, width: 200, height: 120, name: "A1 TX Board" });
   wc.addRect({ x: 420, y: 420, width: 80, height: 40, parentId: b, name: "A1 TX Rect", fills: [{ fillColor: "#33ff66" }] });
   wc.closeBoard();
@@ -141,7 +149,7 @@ try {
     `[TX] edit visible in a direct runtime get-file after update-file`);
 
   const stagedStatus = await status(runtime.base);
-  check(stagedStatus.dirty === true && stagedStatus.revn === 258,
+  check(stagedStatus.dirty === true && stagedStatus.revn === revnB + 1,
     `[TX] commit STAGED only — status dirty, revn bumped (SAVE GAP: dirty=${stagedStatus.dirty}, revn=${stagedStatus.revn})`);
   check(!readPageEdns(dir).includes("A1 TX Board"), `[TX] disk still unchanged before save (proves the gap)`);
 
