@@ -39,6 +39,10 @@ export class WorkingCopy {
   swapComponent(instanceId, newComponentId) { return this.session.swapComponent(instanceId, newComponentId); }
   // Detach an instance from its component (becomes a plain shape tree).
   detachInstance(instanceId) { return this.session.detachInstance(instanceId); }
+  // Promote a component instance into a variant set (variant-container); returns the container id.
+  makeVariant(instanceId, opts = {}) { return this.session.makeVariant(instanceId, JSON.stringify(opts)); }
+  // Add a sibling variant to an existing variant set; returns the new variant instance id.
+  addVariant(variantShapeId) { return this.session.addVariant(variantShapeId); }
   // Group existing shapes (sharing a parent) into a new group; returns the group id.
   groupShapes(ids, opts = {}) { return this.session.groupShapes(JSON.stringify(ids), JSON.stringify(opts)); }
   // Dissolve a group, lifting its children back to the group's parent.

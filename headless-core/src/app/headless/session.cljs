@@ -5,6 +5,9 @@
    [app.common.files.changes :as cfc]            ; process-changes (apply to file-data)
    [app.common.files.changes-builder :as pcb]    ; update-shapes -> :mod-obj diffs
    [app.common.logic.libraries :as cll]          ; generate-instantiate-component
+   [app.common.logic.variants :as clv]           ; generate-add-new-variant
+   [app.common.logic.variant-properties :as clvp]; generate-make-shapes-variant
+   [app.common.files.shapes-helpers :as cfsh]    ; prepare-create-artboard-from-selection
    [app.common.logic.shapes :as cls]             ; generate-delete-shapes / generate-relocate
    [app.common.files.helpers :as cfh]            ; get-parent-id (reorder within parent)
    [app.common.geom.point :as gpt]               ; gpt/point (instance position)
@@ -718,6 +721,69 @@
                                                 index target-cell keep-props false))]
            (apply-changes! state changes)
            (str (:id new-shape))))
+       :makeVariant
+       ;; Promote a component main-instance into a VARIANT SET: wrap it in a new
+       ;; variant-container board and assign variant properties to its component.
+       ;; (1) cfsh/prepare-create-artboard-from-selection creates the container
+       ;; board (a cts/setup-shape RECORD) and reparents the instance into it; like
+       ;; groupShapes the only new shape is that record, so check-shape never sees
+       ;; the hydrated plain-map children -> plain-map safe. (2) mark it a variant
+       ;; container. (3) clvp/generate-make-shapes-variant updates the existing
+       ;; component/instance (variant-id + variant-properties) via
+       ;; pcb/update-component / update-shapes (no check-shape). Returns container id.
+       (fn [shape-id json]
+         (let [{:keys [name]} (args json)
+               pid       (:page-id @state)
+               sid       (uuid/parse shape-id)
+               objects   (objects-of state)
+               instance  (get objects sid)
+               vid       (uuid/next)
+               cname     (or name (:name instance))
+               ch0       (-> (pcb/empty-changes nil pid)
+                             (pcb/with-page-id pid)
+                             (pcb/with-library-data (:data @state))
+                             (pcb/with-objects objects))
+               [_frame ch1]
+               (cfsh/prepare-create-artboard-from-selection
+                ch0 vid nil objects [sid] nil cname false nil nil)
+               ch2       (-> ch1
+                             (pcb/update-shapes [vid]
+                                                (fn [s] (assoc s :is-variant-container true
+                                                               :name cname
+                                                               :r1 20 :r2 20 :r3 20 :r4 20))))
+               container (get (pcb/get-objects ch2) vid)
+               instance' (get (pcb/get-objects ch2) sid)
+               ch3       (clvp/generate-make-shapes-variant ch2 [instance'] container)]
+           (apply-changes! state ch3)
+           (str vid)))
+       :addVariant
+       ;; Add a sibling variant to an existing variant set. The shape must already
+       ;; belong to a variant (its component carries :variant-id). Wraps Penpot's
+       ;; clv/generate-add-new-variant, which DUPLICATES the component
+       ;; (generate-duplicate-component -> instantiates), so it needs the same
+       ;; hydrated-data coercion as swap/instantiate (records + restored :data :id).
+       ;; Returns the new variant instance root id.
+       (fn [shape-id]
+         (let [pid       (:page-id @state)
+               sid       (uuid/parse shape-id)
+               data      (-> (:data @state) (coerce-data-for-validation) (assoc :id file-id))
+               page      (get-in data [:pages-index pid])
+               objects   (:objects page)
+               shape     (get objects sid)
+               component (get-in data [:components (:component-id shape)])
+               variant-id (:variant-id component)
+               _         (when (nil? variant-id)
+                           (throw (ex-info "addVariant: shape is not a variant; call makeVariant first" {})))
+               new-cid   (uuid/next)
+               new-sid   (uuid/next)
+               prop-num  (dec (count (:variant-properties component)))
+               ch        (-> (pcb/empty-changes nil pid)
+                             (pcb/with-page-id pid)
+                             (pcb/with-library-data data)
+                             (pcb/with-objects objects)
+                             (clv/generate-add-new-variant shape variant-id new-cid new-sid prop-num))]
+           (apply-changes! state ch)
+           (str new-sid)))
        :detachInstance
        ;; Detach a component instance (and its children) from its component, so it
        ;; becomes a plain shape tree. cll/generate-detach-instance strips the
