@@ -56,3 +56,13 @@ test("addInteraction works on a fromStore-hydrated (plain-map) session and survi
   const objs3 = JSON.parse(s3.objects());
   assert.equal(objs3[a].interactions[0].destination, b, "interaction survives a store round-trip");
 });
+
+test("addInteraction rejects an invalid eventType/actionType (fail-fast)", () => {
+  const s = createSession(JSON.stringify({ empty: true, name: "Proto3" }));
+  const f = s.addBoard(JSON.stringify({ x: 0, y: 0, width: 100, height: 100, name: "F" }));
+  s.closeBoard();
+  assert.throws(() => s.addInteraction(JSON.stringify({ shapeId: f, eventType: "hover" })),
+    /invalid eventType/, "bad eventType throws a clear error");
+  assert.throws(() => s.addInteraction(JSON.stringify({ shapeId: f, actionType: "teleport" })),
+    /invalid actionType/, "bad actionType throws a clear error");
+});

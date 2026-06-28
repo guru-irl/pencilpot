@@ -401,6 +401,12 @@
                dest-id (when destination (uuid/parse destination))
                et      (keyword (or eventType "click"))
                at      (keyword (or actionType "navigate"))
+               _       (when-not (contains? csi/event-types et)
+                         (throw (ex-info (str "addInteraction: invalid eventType " (pr-str (or eventType "click"))
+                                              "; valid: " (pr-str csi/event-types)) {})))
+               _       (when-not (contains? csi/action-types at)
+                         (throw (ex-info (str "addInteraction: invalid actionType " (pr-str (or actionType "navigate"))
+                                              "; valid: " (pr-str csi/action-types)) {})))
                base    (-> csi/default-interaction
                            (csi/set-event-type et shape)
                            (csi/set-action-type at))
