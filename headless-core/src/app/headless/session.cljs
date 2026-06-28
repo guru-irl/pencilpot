@@ -315,7 +315,8 @@
                token-set (or existing (ctob/make-token-set :name set-name))
                set-id    (ctob/get-id token-set)
                token     (ctob/make-token :name name :type :color :value value)
-               hidden    (ctob/make-hidden-theme)
+               hidden    (or (some-> lib (ctob/get-theme (ctob/get-id (ctob/make-hidden-theme))))
+                             (ctob/make-hidden-theme))
                hidden+   (ctob/enable-set hidden set-name)
                changes   (-> (pcb/empty-changes nil)
                              (pcb/with-library-data data)
@@ -344,7 +345,8 @@
                token-set (or existing (ctob/make-token-set :name set-name))
                set-id    (ctob/get-id token-set)
                token     (ctob/make-token :name name :type tkw :value value)
-               hidden    (ctob/make-hidden-theme)
+               hidden    (or (some-> lib (ctob/get-theme (ctob/get-id (ctob/make-hidden-theme))))
+                             (ctob/make-hidden-theme))
                hidden+   (ctob/enable-set hidden set-name)
                changes   (-> (pcb/empty-changes nil)
                              (pcb/with-library-data data)
@@ -509,8 +511,20 @@
                objects (objects-of state)
                ids     (mapv uuid/parse (args ids-json))
                raw     (args attrs-json)
+               ;; Refuse identity/structure/geometry keys: setting them raw would
+               ;; break referential integrity or geometry consistency (and the
+               ;; schema-only validate() would not catch it). Steer to the verbs.
+               deny    #{:id :type :shapes :parent-id :frame-id :component-id
+                         :component-file :component-root :main-instance :shape-ref
+                         :selrect :points :x :y :width :height :transform
+                         :transform-inverse :rotation :applied-tokens :interactions}
+               bad     (filter deny (keys raw))
+               _       (when (seq bad)
+                         (throw (ex-info (str "updateShapes: refusing to set structural/geometry key(s) "
+                                              (pr-str (vec bad)) "; use moveShape/resizeShape/reparentShape/"
+                                              "reorderShape/groupShapes/applyToken/addInteraction instead") {})))
                enum-ks #{:constraints-h :constraints-v :blend-mode :grow-type
-                         :vertical-align :horizontal-align :type}
+                         :vertical-align :horizontal-align}
                attrs   (reduce-kv (fn [m k v]
                                     (assoc m k (if (and (contains? enum-ks k) (string? v))
                                                  (keyword v) v)))
@@ -589,8 +603,18 @@
                ch      (-> (pcb/empty-changes nil pid)
                            (pcb/with-page-id pid)
                            (pcb/with-objects objects)
-                           (pcb/update-shapes ids (fn [s] (gsh/move s v))))]
-           (apply-changes! state ch)
+                           (pcb/update-shapes ids (fn [s] (gsh/move s v))))
+               _       (apply-changes! state ch)
+               ;; reflow ancestor containers (groups auto-size to children) so
+               ;; their geometry stays consistent after the subtree moved.
+               objs2   (objects-of state)
+               anc     (->> (cfh/get-parent-ids objs2 sid) (remove #(= % root-frame)) vec)
+               ch2     (when (seq anc)
+                         (-> (pcb/empty-changes nil pid)
+                             (pcb/with-page-id pid)
+                             (pcb/with-objects objs2)
+                             (pcb/resize-parents anc)))]
+           (when ch2 (apply-changes! state ch2))
            (str sid)))
        :resizeShape
        ;; Resize an existing shape to {width?,height?}. Uses Penpot's own dimension

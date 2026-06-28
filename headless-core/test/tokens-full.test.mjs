@@ -5,6 +5,19 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createSession } from "../target/headless/penpot.js";
 
+test("addToken across multiple sets keeps all sets active (multi-set hidden theme)", () => {
+  const s = createSession(JSON.stringify({ empty: true, name: "MultiSet" }));
+  s.addToken(JSON.stringify({ set: "colors", name: "brand", type: "color", value: "#f06" }));
+  s.addToken(JSON.stringify({ set: "spacing", name: "md", type: "spacing", value: "16" }));
+  // both tokens persist AND the file stays valid; the hidden theme should enable
+  // BOTH sets (the second addToken must not drop the first set).
+  const parts = JSON.parse(s.serializeStore());
+  const s2 = createSession(JSON.stringify({ fromStore: parts }));
+  const names = JSON.parse(s2.tokens()).tokens.map((t) => t.name);
+  assert.ok(names.includes("brand") && names.includes("md"), "tokens from both sets persist");
+  assert.deepEqual(JSON.parse(s2.validate()), [], "validates with tokens in two sets");
+});
+
 test("addToken creates tokens of many types; file validates", () => {
   const s = createSession(JSON.stringify({ empty: true, name: "Tokens" }));
   s.addToken(JSON.stringify({ set: "core", name: "color.brand", type: "color", value: "#ff0066" }));

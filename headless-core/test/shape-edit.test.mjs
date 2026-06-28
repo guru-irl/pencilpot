@@ -16,7 +16,7 @@ test("updateShapes merges attrs + keyword-coerces enums; validates", () => {
   s.closeBoard();
 
   const count = s.updateShapes(JSON.stringify([r]), JSON.stringify({
-    name: "renamed", opacity: 0.5, rotation: 30,
+    name: "renamed", opacity: 0.5,
     fills: [{ "fill-color": "#ff0066", "fill-opacity": 1 }],
     "constraints-h": "center",
   }));
@@ -25,10 +25,20 @@ test("updateShapes merges attrs + keyword-coerces enums; validates", () => {
   const o = JSON.parse(s.objects())[r];
   assert.equal(o.name, "renamed");
   assert.equal(o.opacity, 0.5);
-  assert.equal(o.rotation, 30);
   assert.equal(o.fills[0]["fill-color"], "#ff0066");
   assert.equal(o["constraints-h"], "center", "enum value coerced to a keyword and serialized back");
   assert.deepEqual(JSON.parse(s.validate()), [], "file validates after the edit");
+});
+
+test("updateShapes refuses structural/geometry keys (fail-fast)", () => {
+  const s = createSession(JSON.stringify({ empty: true, name: "Guard" }));
+  const b = board(s, { x: 0, y: 0, width: 400, height: 400, name: "Frame" });
+  const r = s.addRect(JSON.stringify({ x: 10, y: 10, width: 100, height: 50, name: "rect" }));
+  s.closeBoard();
+  for (const bad of [{ x: 5 }, { width: 9 }, { "parent-id": b }, { type: "circle" }, { shapes: [] }, { selrect: {} }]) {
+    assert.throws(() => s.updateShapes(JSON.stringify([r]), JSON.stringify(bad)),
+      /structural\/geometry/, `rejects ${JSON.stringify(bad)}`);
+  }
 });
 
 test("deleteShapes removes an existing shape", () => {

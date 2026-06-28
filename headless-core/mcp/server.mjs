@@ -11,7 +11,7 @@ export function createHeadlessMcp({ token, base } = {}) {
   const tok = token ?? process.env.PENPOT_TOKEN;
   const server = new McpServer(
     { name: "penpot-headless", version: "0.1.0" },
-    { instructions: "Headless Penpot editing. checkout(fileId) a file, then script(code) to edit it (globals: wc, with wc.addBoard/addRect/addEllipse/addText/closeBoard/setFlexLayout/setGridLayout/setConstraints/createComponent/instantiateComponent/addInteraction/addColorToken), then commit(). No browser needed." }
+    { instructions: "Headless Penpot editing. checkout(fileId) a file, then script(code) to edit it, then commit(). The `wc` global can both BUILD (addBoard/addRect/addEllipse/addText/closeBoard/setFlexLayout/setGridLayout/setConstraints/createComponent/instantiateComponent/addInteraction/addToken) and EDIT EXISTING shapes (updateShape/deleteShape/reparentShape/reorderShape/moveShape/resizeShape/applyToken/swapComponent/detachInstance/groupShapes/ungroupShape). No browser needed." }
   );
   let wc = null;
   const need = () => { if (!wc) throw new Error("No file checked out. Call checkout(fileId) first."); return wc; };
@@ -23,7 +23,7 @@ export function createHeadlessMcp({ token, base } = {}) {
       return text({ checkedOut: fileId, revn: wc.revn, objects: Object.keys(objs).length }); });
 
   server.registerTool("script",
-    { description: "Run JS against the working copy. Globals: `wc` (addBoard/addRect/addEllipse/addText/closeBoard/setFlexLayout/setGridLayout/setConstraints/setGrowType/createComponent/instantiateComponent/addInteraction/addColorToken/validate/pendingChanges). addInteraction({shapeId,destination,eventType?,actionType?}) wires a prototype link (click->navigate by default). Do many edits in one call; return a value. No network until commit.",
+    { description: "Run JS against the working copy. `wc` BUILDS (addBoard/addRect/addEllipse/addText/closeBoard/setFlexLayout/setGridLayout/setConstraints/setGrowType/createComponent/instantiateComponent/addInteraction/addToken/addColorToken) and EDITS existing shapes: updateShape(id,attrs) updateShapes(ids,attrs) deleteShape(id) reparentShape(id,parentId,{index?}) reorderShape(id,index) moveShape(id,{x?,y?,dx?,dy?}) resizeShape(id,{width?,height?}) applyToken(id,{token,attributes}) unapplyToken(id,attributes) swapComponent(instanceId,newComponentId) detachInstance(id) groupShapes(ids,{name?}) ungroupShape(id). addToken({set?,name,type?=color,value}) supports all token types; addInteraction({shapeId,destination,eventType?,actionType?}) wires a prototype link. Also validate()/pendingChanges(). Do many edits in one call; return a value. No network until commit.",
       inputSchema: { code: z.string().min(1) } },
     async ({ code }) => { const w = need(); const r = await runScript(code, { wc: w });
       return text(r.ok ? { result: r.result, log: r.log, pending: w.pendingChanges().length } : { error: r.error, log: r.log }); });
