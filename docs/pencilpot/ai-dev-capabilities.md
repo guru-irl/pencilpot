@@ -64,17 +64,19 @@ An AI dev loop MUST save explicitly, or the edit is lost on restart/discard. Pol
 | `instantiateComponent(componentId,{x,y})` | WORKS | places a copy of a main component (carries `:shape-ref`/`:component-*`); fixed for hydrated designs in `01cc717d26` |
 | `updateShape(id,attrs)` / `updateShapes(ids,attrs)` | WORKS | merge non-structural attrs (fills/strokes/opacity/blend/constraints/name/hidden/…); refuses structural/geometry keys |
 | `moveShape(id,{x,y}\|{dx,dy})` / `resizeShape(id,{width?,height?})` | WORKS | geometry via the modifier engine; subtree + ancestors reflow |
+| `rotateShape(id,{angle,cx?,cy?})` | WORKS | rotate ° about the shape center (or pivot); recomputes :rotation+:selrect+:points (`6231daeab6`) |
 | `deleteShape(id)` / `deleteShapes(ids)` | WORKS | delete + descendants (component-copy children hidden) |
 | `reparentShape(id,parentId,{index?})` / `reorderShape(id,index)` | WORKS | move under a new parent / change z-order (`cls/generate-relocate`) |
 | `groupShapes(ids,{name?})` / `ungroupShape(groupId)` | WORKS | wrap shapes in a `:group` / dissolve it |
 | `swapComponent(instanceId,newComponentId)` / `detachInstance(id)` | WORKS | swap an instance to another component / unlink it |
+| `makeVariant(instanceId,{name?})` / `addVariant(variantShapeId)` | WORKS | promote a component into a variant SET / add a sibling variant (`b7de630af8`) |
 
 ### Design-system assets
 | Surface | Status | Notes |
 |---|---|---|
 | `addColorToken({set,name,value})` + `tokens()` | WORKS | persists to `<design>/manifest.edn`; name uses `.` for groups, `/` invalid |
 | `addToken({set,name,type,value})` (all types) | WORKS | color/spacing/sizing/dimension/border-radius/opacity/rotation/font-size/typography… (fail-fast on bad type) |
-| `applyToken(id,{token,attributes})` / `unapplyToken` | WORKS | binds a token to shape attrs via `:applied-tokens` (value resolves under the tokens runtime) |
+| `applyToken(id,{token,attributes})` / `unapplyToken` | WORKS | binds via `:applied-tokens`; LITERAL 6-digit-hex/numeric values resolve onto the attr at author time, references resolve under the tokens runtime (`6c36b75dd4`) |
 | CLI `pencilpot map-variable <project> --font-id … --map "Fam=wdth:..,opsz:.."` | WORKS | the supported variable-font persistence path; strips stale position-data |
 | MCP `map_fonts_variable` / `wc.mapFontsToVariable` | PARTIAL | whole-file `:data` transform, records NO change → does NOT round-trip `commit()`; persist via CLI |
 | CLI `pencilpot fonts <project>` | WORKS | lists custom fonts + missing-families report |
@@ -99,16 +101,16 @@ An AI dev loop MUST save explicitly, or the edit is lost on restart/discard. Pol
 ---
 
 ## 3. Confirmed GAPs (what an AI cannot do today) + workarounds
-1. **Component variants** (creating variant *sets*) — `swapComponent` works, but authoring variant sets has no verb.
-2. **Rotate** — no `rotateShape` verb yet (raw `:rotation` is refused by `updateShape` for geometry consistency).
-3. **Token value RESOLUTION** — `applyToken` records the binding; the value resolves under the tokens runtime, not at author time.
-4. **`mapFontsToVariable` doesn't round-trip `commit()`** → persist variable-font remaps with the CLI.
+1. **Variant set visual auto-arrange** — `makeVariant` creates the container but doesn't flex-arrange it; call `setFlexLayout` after.
+2. **Token resolution for references / `rgb()` / 3-or-8-digit hex** — `applyToken` resolves only literal 6-digit-hex + plain numerics at author time; the rest record the binding (the tokens runtime resolves on open).
+3. **`mapFontsToVariable` typography/component remap via `commit()`** — page-shape remaps round-trip through `commit()`; file-level typographies/components persist via the `map-variable` CLI only.
 
-> **Closed by the SDK full-control waves** (`267c9dadc5`·`42b5012dbc`·`bf177af750`·`96cb0f5f6d`·`11adf98831`·`8fe3190c8d`):
-> structural editing of existing shapes (update/move/resize/delete/reparent/reorder/group/ungroup),
-> tokens of **all** types + token→shape binding, and component **swap**/detach — all verified on
-> hydrated (disk) sessions + store round-trips. Earlier closures: `instantiateComponent` (`01cc717d26`)
-> and interaction authoring `addInteraction` (`5268503075`).
+> **Closed by the last-gaps waves** (`6231daeab6`·`4d6fc23a8d`·`6c36b75dd4`·`b7de630af8`·review-nits `8fe3190c8d`):
+> `rotateShape`, `mapFontsToVariable` `commit()` round-trip (page shapes), `applyToken` literal-value
+> resolution, and component **variants** (`makeVariant`/`addVariant`). Earlier closures: full structural
+> editing (`267c9dadc5`…), `instantiateComponent` (`01cc717d26`), `addInteraction` (`5268503075`).
+> All verified on hydrated (disk) sessions + store round-trips and, for the structural verbs, a live
+> runtime e2e (`pencilpot/e2e/ai/sdk-edit.mjs`).
 
 ---
 

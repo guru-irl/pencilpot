@@ -100,10 +100,10 @@ stringifies UUIDs via `stringify-uuids`/`->plain-js`). Grouped:
 |---|---|---|
 | **Authoring** | `addBoard` `closeBoard` `addRect` `addEllipse`(`:circle`) `addText` | `mk-shape` → `cts/setup-shape`; `add-shape!` builds+applies+records a `:add-obj`. Parenting is a STACK: `addBoard` pushes the board as active `:frame-id`+parent; `closeBoard` pops. `addText` runs `txt/change-text` and `dissoc`s `:position-data`. |
 | **Layout** | `setFlexLayout` `setGridLayout` `setGrowType` `setConstraints` | (A) `pcb/update-shapes` writes the layout attrs onto the board; (B) reflow children through Penpot's OWN engine — `ctm/reflow-modifiers` seed → `gm/set-objects-modifiers` → `gsh/transform-shape`. Grid builds tracks via `ctl/add-grid-column`/`assign-cells`/`reorder-grid-children`. |
-| **Components** | `createComponent` `instantiateComponent` `swapComponent` `detachInstance` | `createComponent` promotes an existing board: raw `:add-component` + `:mod-obj` (sets `:component-root`/`:main-instance`/`:component-id`/`:component-file`). `instantiateComponent` calls `cll/generate-instantiate-component` over **records + `:data` `:id`-restored** (coerce-for-validation), so it works on hydrated designs too (fix `01cc717d26`). `swapComponent` uses the SAME coercion + `cll/generate-component-swap`; `detachInstance` uses `cll/generate-detach-instance` (plain-map safe). |
-| **Edit existing shapes** | `updateShapes` `deleteShapes` `reparentShape` `reorderShape` `moveShape` `resizeShape` `groupShapes` `ungroupShape` | All over the engine's high-level generators, plain-map safe (no `cts/check-shape`). `updateShapes` = raw `pcb/update-shapes` with a structural/geometry-key denylist. `delete` = `cls/generate-delete-shapes`; `reparent`/`reorder`/`ungroup` = `cls/generate-relocate` (auto-cleans emptied groups). `moveShape` translates the subtree (`gsh/move`) + `pcb/resize-parents` for ancestors; `resizeShape` = `ctm/change-dimensions-modifiers` through `gm/set-objects-modifiers`. `groupShapes` adds a `cts/setup-shape` `:group` record + `pcb/change-parent`. |
-| **Tokens** | `addToken` `addColorToken` `applyToken` `unapplyToken` `tokens` | FILE-level `TokensLib`: `pcb/with-library-data` + `set-token-set`/`set-token` + the existing hidden theme enabled additively (mirrors frontend `create-token-with-set`). `addToken` passes `:type` to `ctob/make-token` (ALL types; fail-fast on invalid). `applyToken`/`unapplyToken` write the shape's `:applied-tokens` via `cto/apply-token-to-shape`. |
-| **Fonts** | `mapFontsToVariable` `retargetFonts` | whole-`:data` `walk/postwalk`: rewrite `:font-id`/`:font-family`/`:font-variant-id`, merge axis map into `:font-variation-settings`, strip stale `:position-data`. NOT a recorded change → does not round-trip `commit()` (doc `06`; persist via CLI). |
+| **Components** | `createComponent` `instantiateComponent` `swapComponent` `detachInstance` `makeVariant` `addVariant` | `createComponent` promotes an existing board: raw `:add-component` + `:mod-obj` (sets `:component-root`/`:main-instance`/`:component-id`/`:component-file`). `instantiateComponent` calls `cll/generate-instantiate-component` over **records + `:data` `:id`-restored** (coerce-for-validation), so it works on hydrated designs too (fix `01cc717d26`). `swapComponent`/`addVariant` use the SAME coercion (both instantiate — `cll/generate-component-swap` / `clv/generate-add-new-variant`→`generate-duplicate-component`). `detachInstance` uses `cll/generate-detach-instance` (plain-map safe). `makeVariant` is plain-map safe: `cfsh/prepare-create-artboard-from-selection` makes the container frame (a `cts/setup-shape` record — only the new frame is `check-shape`d) then `clvp/generate-make-shapes-variant` assigns `:variant-id`/`:variant-properties`. |
+| **Edit existing shapes** | `updateShapes` `deleteShapes` `reparentShape` `reorderShape` `moveShape` `resizeShape` `rotateShape` `groupShapes` `ungroupShape` | All over the engine's high-level generators, plain-map safe (no `cts/check-shape`). `updateShapes` = raw `pcb/update-shapes` with a structural/geometry-key denylist. `delete` = `cls/generate-delete-shapes`; `reparent`/`reorder`/`ungroup` = `cls/generate-relocate` (auto-cleans emptied groups). `moveShape` translates the subtree (`gsh/move`) + `pcb/resize-parents` for ancestors; `resizeShape`/`rotateShape` run `ctm/change-dimensions-modifiers` / `ctm/rotation-modifiers` through `gm/set-objects-modifiers` (recompute `:selrect`/`:points`). `groupShapes` adds a `cts/setup-shape` `:group` record + `pcb/change-parent`. |
+| **Tokens** | `addToken` `addColorToken` `applyToken` `unapplyToken` `tokens` | FILE-level `TokensLib`: `pcb/with-library-data` + `set-token-set`/`set-token` + the existing hidden theme enabled additively (mirrors frontend `create-token-with-set`). `addToken` passes `:type` to `ctob/make-token` (ALL types; fail-fast on invalid). `applyToken`/`unapplyToken` write `:applied-tokens` via `cto/apply-token-to-shape`; `applyToken` also RESOLVES literal values (6-digit hex → `:fills`/`:stroke-color`, plain numerics via `cft/parse-token-value` → `:opacity`/`:r1..:r4`/`:stroke-width`), leaving references (`cft/is-reference?`) to the runtime. |
+| **Fonts** | `mapFontsToVariable` `retargetFonts` | whole-`:data` `walk/postwalk`: rewrite `:font-id`/`:font-family`/`:font-variant-id`, merge axis map into `:font-variation-settings`, strip stale `:position-data`. `mapFontsToVariable` ALSO records per-page `pcb/update-shapes` changes (so the MCP tool round-trips `commit()`); the whole-`:data` pass is kept for CLI parity (typographies/components — those persist via CLI only). `retargetFonts` stays a direct `:data` transform (doc `06`; CLI persists). |
 | **Changes** | `applyChanges` `applyTransitUpdate` `pendingChanges` `clearChanges` `commitBody` `bumpRevn` | `applyTransitUpdate` (canonical) decodes a transit `update-file` body and applies its `:changes` VERBATIM; `commitBody` encodes the accumulated `:changes` into an `update-file` transit body. |
 | **Serialize** | `serializeStore` `loadStore` | canonical-EDN parts (doc `01`). |
 | **Responses** | `getFileResponse` `getViewerBundle` | shared `build-file-resp` (below). |
@@ -224,20 +224,24 @@ the cache (read-after-write is fresh). See doc `11` for the cache/warmup.
 
 ## Known GAPs (architecture cause; full matrix in `../ai-dev-capabilities.md`)
 
-- **Component variants** (creating variant *sets*) — `swapComponent` works, but variant-set authoring has no verb.
-- **Rotate** — no `rotateShape` verb yet; `updateShapes` refuses raw `:rotation` (geometry would be inconsistent).
-- **Token value resolution** — `applyToken` records the `:applied-tokens` binding; the value resolves under the tokens runtime, not at author time.
-- **`mapFontsToVariable` is a `:data` transform, not a recorded change** → does not round-trip `commit()`;
-  persist variable-font remaps with the `pencilpot map-variable` CLI (doc `06`).
+- **Variant set visual auto-arrange** — `makeVariant` creates the variant container but doesn't flex-arrange
+  it (the UI's `transform-in-variant` is event-driven; the persisted structure is correct). Call
+  `setFlexLayout` on the container to arrange.
+- **Token resolution for references / `rgb()` / 3-or-8-digit hex** — StyleDictionary lives only in the
+  frontend, so `applyToken` resolves only literal 6-digit-hex + plain numerics at author time; everything
+  else records the binding for the tokens runtime.
+- **`mapFontsToVariable` typography/component remap via `commit()`** — page-shape remaps are recorded and
+  round-trip; file-level typographies/components persist via the `map-variable` CLI only.
 
-**Closed (engine follow-ups):** `instantiateComponent` on hydrated designs (`01cc717d26`: clone over `Shape`
-records + restored `:data` `:id`, which was `nil` → invalid `:component-file`); `addInteraction` prototype
-authoring (`5268503075`); and the **SDK full-control waves** (`267c9dadc5`·`42b5012dbc`·`bf177af750`·
-`96cb0f5f6d`·`11adf98831`·`8fe3190c8d`) which turned “append-only” into full structural editing of existing
-shapes (update/move/resize/delete/reparent/reorder/group), tokens of **all** types + binding, and
-component **swap**/detach. The pattern is identical throughout: a thin verb over an existing `cls/`/`cll/`/
-`ctob/` generator + `apply-changes!`; verbs that don't instantiate are plain-map safe (no `cts/check-shape`),
-verbs that do (swap) reuse the instantiate coercion. All verified on hydrated sessions + store round-trips.
+**Closed (engine follow-ups):** `instantiateComponent` on hydrated designs (`01cc717d26`); `addInteraction`
+prototype authoring (`5268503075`); the **SDK full-control waves** (`267c9dadc5`…`8fe3190c8d`) — full
+structural editing + all-type tokens/binding + component swap/detach; and the **last-gaps waves**
+(`6231daeab6` rotateShape · `4d6fc23a8d` mapFonts `commit()` round-trip · `6c36b75dd4` applyToken literal
+resolution · `b7de630af8` variants makeVariant/addVariant). The pattern is identical throughout: a thin
+verb over an existing `cls/`/`cll/`/`clv/`/`clvp/`/`ctm/`/`ctob/`/`cfsh/` generator + `apply-changes!`;
+verbs that don't instantiate are plain-map safe (no `cts/check-shape`), verbs that do (swap, addVariant)
+reuse the instantiate coercion (records + restored `:data` `:id`). All verified on hydrated sessions +
+store round-trips.
 
 For the full WORKS/PARTIAL/GAP capability matrix, exact opts, env vars, and copy-pasteable invocations see
 **`../ai-dev-capabilities.md`** and the **`pencilpot/skills/pencilpot/SKILL.md`** skill.

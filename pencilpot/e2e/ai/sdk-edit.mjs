@@ -37,18 +37,30 @@ try {
   wc.resizeShape(r1, { width: 140 });
   wc.deleteShape(r3);
   const grp = wc.groupShapes([r1, r2], { name: "AUDIT-GROUP" });
+  wc.rotateShape(grp, { angle: 30 });
 
-  // tokens of a non-color type + binding
+  // tokens of a non-color type + binding (+ literal resolution onto the fill)
   wc.addToken({ set: "audit", name: "audit.brand", type: "color", value: "#abcdef" });
   wc.addToken({ set: "audit", name: "audit.gap", type: "spacing", value: "12" });
   wc.applyToken(r1, { token: "audit.brand", attributes: ["fill"] });
+
+  // variants: promote a fresh component into a variant set, then add a sibling
+  const vb = wc.addBoard({ x: 9700, y: 9000, width: 120, height: 80, name: "V-AUDIT" });
+  wc.addRect({ x: 10, y: 10, width: 40, height: 40, name: "vr" });
+  wc.closeBoard();
+  const vcomp = wc.createComponent(vb, { name: "VComp" });
+  const vcontainer = wc.makeVariant(vb, { name: "VSet" });
+  wc.addVariant(vb);
 
   check(wc.newValidationErrors().length === 0, `edits introduce no new validation errors: ${JSON.stringify(wc.newValidationErrors())}`);
 
   const scene = JSON.parse(wc.session.objects());
   check(scene[grp] && scene[grp].type === "group", "group created in the live scene");
+  check(typeof scene[grp].rotation === "number" && scene[grp].rotation !== 0, "group rotated in the live scene");
   check(scene[r1].name === "edited-r1" && scene[r1]["parent-id"] === grp, "r1 edited + grouped");
+  check(scene[r1].fills && scene[r1].fills[0]["fill-color"] === "#abcdef", "literal color token resolved onto r1 fill");
   check(!scene[r3], "r3 deleted from the live scene");
+  check(scene[vcontainer] && scene[vcontainer]["is-variant-container"] === true, "variant container created");
 
   await wc.commit();
   await save(r.base);
@@ -58,6 +70,7 @@ try {
   const pages = readPageEdns(dir);
   check(pages.includes("AUDIT-GROUP"), "group persisted to page EDN");
   check(pages.includes("edited-r1"), "renamed shape persisted to page EDN");
+  check(pages.includes("is-variant-container"), "variant set persisted to page EDN");
   check(!pages.includes("r3-doomed"), "deleted shape absent from page EDN");
 
   // token persists to the design manifest (TokensLib lives there). Find manifest.edn

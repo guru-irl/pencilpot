@@ -69,14 +69,17 @@ stack-based: close a board before starting an unrelated sibling.
 | `wc.updateShape(id,{name?,opacity?,fills?,strokes?,blendMode?,constraintsH?,hidden?,…})` / `wc.updateShapes(ids,attrs)` | merge non-structural attrs onto existing shapes |
 | `wc.moveShape(id,{x,y})` or `{dx,dy}` | move a shape (carries its whole subtree; ancestors reflow) |
 | `wc.resizeShape(id,{width?,height?})` | resize (children reflow via the modifier engine) |
+| `wc.rotateShape(id,{angle,cx?,cy?})` | rotate `angle`° about the shape center (or `{cx,cy}`); recomputes `:rotation`+`:selrect`+`:points` |
 | `wc.deleteShape(id)` / `wc.deleteShapes(ids)` | delete shapes (+ descendants; component-copy children are hidden) |
 | `wc.reparentShape(id,parentId,{index?})` | move under a new board/group/frame |
 | `wc.reorderShape(id,index)` | change z-order within the parent |
 | `wc.groupShapes(ids,{name?})` / `wc.ungroupShape(groupId)` | group / dissolve a group |
 | `wc.swapComponent(instanceId,newComponentId)` | replace an instance with another component |
 | `wc.detachInstance(id)` | unlink an instance from its component |
+| `wc.makeVariant(instanceId,{name?})` | promote a component instance into a variant SET (variant-container board) |
+| `wc.addVariant(variantShapeId)` | add a sibling variant to an existing variant set |
 | `wc.addToken({set,name,type,value})` | token of ANY type: color/spacing/sizing/dimension/border-radius/opacity/rotation/font-size/typography… |
-| `wc.applyToken(id,{token,attributes:[…]})` / `wc.unapplyToken(id,attributes)` | bind/unbind a token to shape attrs (`fill`,`stroke-color`,`width`,`height`,`r1`..`r4`,`p1`..`p4`,…) |
+| `wc.applyToken(id,{token,attributes:[…]})` / `wc.unapplyToken(id,attributes)` | bind a token to shape attrs (`fill`,`stroke-color`,`width`,`r1`..`r4`,`p1`..`p4`,…); LITERAL 6-digit-hex/numeric values resolve onto the attr immediately, references resolve under the tokens runtime |
 
 > `updateShape` **refuses** identity/structure/geometry keys (`id`/`type`/`shapes`/`parent-id`/`selrect`/
 > `x`/`y`/`width`/`height`/`rotation`/…) and throws — use `moveShape`/`resizeShape`/`reparentShape`/
@@ -92,7 +95,8 @@ pencilpot fonts <project.pencil>            # list custom fonts + missing-famili
 pencilpot retarget-fonts <project.pencil> --family "Name=fontId"   # consolidate duplicate ids (no axes)
 ```
 `map-variable` rewrites the on-disk EDN and strips stale position-data so widths re-layout. The MCP
-`map_fonts_variable` tool applies the same transform but **does NOT round-trip `commit()`** — use the CLI to persist.
+`map_fonts_variable` tool now records the per-shape remap so it **round-trips `commit()`**, but file-level
+typographies/components persist via the **CLI only** — use `map-variable` for a complete remap.
 
 ## Prototypes
 
@@ -102,14 +106,16 @@ for overlay/url/prev-screen). Pencilpot then **plays** the prototype — importe
 yours: the play button opens `/view` in a separate window; `get-view-only-bundle` feeds the native
 viewer; hotspot clicks navigate frames.
 
-## GAPs — the few things still missing via SDK/MCP
+## GAPs — the few residual things via SDK/MCP
+
+Structural editing, rotation, all-type tokens + literal resolution, component swap, and **variant sets**
+(`makeVariant`/`addVariant`) all WORK now. What's left is narrow:
 
 | Want | Reality | Do instead |
 |---|---|---|
-| Component **variants** (variant sets) | `swapComponent` works; creating variant *sets* has no verb yet | UI for variants |
-| **Rotate** a shape | no `rotateShape` verb yet (raw `rotation` is refused for consistency) | UI for rotation |
-| Token **value resolution** onto attributes | `applyToken` records the binding; the value resolves under the tokens runtime, not at author time | binding persists; open the design to resolve |
-| `mapFontsToVariable` round-trip | doesn't persist via `commit()` | use the `map-variable` CLI |
+| Variant set **visual auto-arrange** | `makeVariant` creates the variant container but doesn't flex-arrange it | call `wc.setFlexLayout(containerId,{dir,gap,…})` after |
+| Token resolution for **references / `rgb()` / 3-or-8-digit hex** | `applyToken` resolves only literal 6-digit-hex + plain numerics at author time; the rest record the binding | open the design — the tokens runtime resolves the binding |
+| `mapFontsToVariable` **typography/component** remap via `commit()` | page-shape remaps round-trip through `commit()`; file-level typographies/components persist via the **`map-variable` CLI** only | use the CLI to persist a full remap |
 
 ## Common mistakes
 
