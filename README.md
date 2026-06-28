@@ -1,165 +1,147 @@
-<img width="100%" src="https://github.com/user-attachments/assets/da17b160-f289-436f-b140-972083a08602" />
+# Pencilpot
 
-[uri_license]: https://www.mozilla.org/en-US/MPL/2.0
-[uri_license_image]: https://img.shields.io/badge/MPL-2.0-blue.svg
+**A local, filesystem-native Penpot design IDE — no backend.**
 
-<p align="center">
-  <a href="https://www.digitalpublicgoods.net/r/penpot" rel="nofollow">
-    <img alt="Verified DPG" src="https://img.shields.io/badge/Verified-DPG-3333AB?logo=data:image/svg%2bxml;base64,PHN2ZyB3aWR0aD0iMzEiIGhlaWdodD0iMzMiIHZpZXdCb3g9IjAgMCAzMSAzMyIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTE0LjIwMDggMjEuMzY3OEwxMC4xNzM2IDE4LjAxMjRMMTEuNTIxOSAxNi40MDAzTDEzLjk5MjggMTguNDU5TDE5LjYyNjkgMTIuMjExMUwyMS4xOTA5IDEzLjYxNkwxNC4yMDA4IDIxLjM2NzhaTTI0LjYyNDEgOS4zNTEyN0wyNC44MDcxIDMuMDcyOTdMMTguODgxIDUuMTg2NjJMMTUuMzMxNCAtMi4zMzA4MmUtMDVMMTEuNzgyMSA1LjE4NjYyTDUuODU2MDEgMy4wNzI5N0w2LjAzOTA2IDkuMzUxMjdMMCAxMS4xMTc3TDMuODQ1MjEgMTYuMDg5NUwwIDIxLjA2MTJMNi4wMzkwNiAyMi44Mjc3TDUuODU2MDEgMjkuMTA2TDExLjc4MjEgMjYuOTkyM0wxNS4zMzE0IDMyLjE3OUwxOC44ODEgMjYuOTkyM0wyNC44MDcxIDI5LjEwNkwyNC42MjQxIDIyLjgyNzdMMzAuNjYzMSAyMS4wNjEyTDI2LjgxNzYgMTYuMDg5NUwzMC42NjMxIDExLjExNzdMMjQuNjI0MSA5LjM1MTI3WiIgZmlsbD0id2hpdGUiLz4KPC9zdmc+Cg==">
-  </a>
-  <a href="https://community.penpot.app" rel="nofollow">
-    <img alt="Penpot Community" src="https://img.shields.io/discourse/posts?server=https%3A%2F%2Fcommunity.penpot.app">
-  </a>
-  <a href="https://tree.taiga.io/project/penpot/" rel="nofollow">
-    <img alt="Managed with Taiga.io" src="https://img.shields.io/badge/managed%20with-TAIGA.io-709f14.svg">
-  </a>
-  <a href="https://gitpod.io/#https://github.com/penpot/penpot" rel="nofollow">
-    <img alt="Gitpod ready-to-code" src="https://img.shields.io/badge/Gitpod-ready--to--code-blue?logo=gitpod">
-  </a>
-</p>
+Pencilpot serves the stock Penpot SPA designer from a tiny Node runtime that answers the file RPCs out of
+an on-disk, **git-friendly EDN store**. There is no JVM, no Postgres, no auth, no realtime collaboration
+server. Designs live in `.pencil` projects you open from the CLI or by double-clicking in your file
+manager, and every change is a plain diff you can version, branch, and review like code.
 
-<p align="center">
-  <a href="https://penpot.app/"><b>Website</b></a>  •
-  <a href="https://help.penpot.app/user-guide/"><b>User Guide</b></a>  •
-  <a href="https://penpot.app/learning-center"><b>Learning Center</b></a>  •
-  <a href="https://community.penpot.app/"><b>Community</b></a>
-</p>
-<p align="center">
-  <a href="https://www.youtube.com/@Penpot"><b>Youtube</b></a>  •
-  <a href="https://peertube.kaleidos.net/a/penpot_app/video-channels"><b>Peertube</b></a>  •
-  <a href="https://www.linkedin.com/company/penpot/"><b>Linkedin</b></a>  •
-  <a href="https://instagram.com/penpot.app"><b>Instagram</b></a>  •
-  <a href="https://fosstodon.org/@penpot/"><b>Mastodon</b></a>  •
-  <a href="https://bsky.app/profile/penpot.app"><b>Bluesky</b></a>  •
-  <a href="https://twitter.com/penpotapp"><b>X</b></a>
-</p>
+Two principles shape the whole thing:
 
-[Penpot video](https://github.com/user-attachments/assets/7c67fd7c-04d3-4c9b-88ec-b6f5e23f8332)
+- **No injection.** Every frontend change is native Penpot **CLJS/SCSS**, compiled into our own bundle —
+  nothing is monkey-patched at runtime.
+- **STABLE SVG renderer, not wasm.** Pencilpot renders on Penpot's SVG path, which is what makes
+  SVG-native variable fonts and the lightweight prototype viewer practical.
 
-Penpot is the open-source design platform for teams that build digital products at scale.
+> 📚 Full architecture & guides live in [`docs/pencilpot/`](docs/pencilpot/) — start at its
+> [README](docs/pencilpot/README.md), then the phase-numbered
+> [architecture tree](docs/pencilpot/architecture/README.md).
+>
+> *This is a downstream, local-first reworking of [Penpot](https://github.com/penpot/penpot). The
+> upstream project is mirrored on the `penpot-main` and `penpot-develop` branches.*
 
-Penpot’s key strength lies in giving you **full ownership of your design infrastructure**. Built on open source and designed for [self-hosting](https://help.penpot.app/technical-guide/getting-started/), it puts teams in complete control of their design environment supporting strict compliance and governance requirements. Whether used in the **browser or deployed on your own servers**, Penpot **works with open standards** like SVG, CSS, HTML, and JSON. 
+---
 
-Real-time collaboration strengthens this foundation, helping teams scale and bring design closer to the product through top-tier capabilities. Additionally, developers feel at home using Penpot, because design is expressed as code, enabling a direct translation and shipping products faster. 
+## What's inside
 
-Best-in-class native [Design Tokens](https://penpot.dev/collaboration/design-tokens) provide a single source of truth between design and development. They ensure consistency, improve collaboration, and make it easier to manage complex design systems.
+| Capability | What it does | Deep dive |
+|---|---|---|
+| **EDN store + runtime** | Designs exploded to per-page / per-component EDN; a Node HTTP server answers file RPCs from disk | [01](docs/pencilpot/architecture/01-runtime-store.md) |
+| **Own bundle, stripped shell** | Serves a self-built frontend with auth/dashboard/collab removed; boots straight into the workspace | [03](docs/pencilpot/architecture/03-frontend-strip.md) |
+| **`.pencil` projects + desktop** | Project model, the `pencilpot` CLI, and OS integration (double-click `*.pencil` → editor) | [04](docs/pencilpot/architecture/04-desktop.md) |
+| **Integrated terminal** | PTY↔WS bridge + xterm.js dock inside the editor | [05](docs/pencilpot/architecture/05-terminal.md) |
+| **SVG-native variable fonts** | Per-family axis mapping (`wght`/`wdth`/`opsz`…), the `map-variable` CLI, position-data re-layout | [06](docs/pencilpot/architecture/06-variable-fonts.md) |
+| **Media / image flow** | Upload, from-URL, and clone of file media objects with a clean on-disk contract | [07](docs/pencilpot/architecture/07-media-flow.md) |
+| **Working copy + manual save** | In-memory edits, a content-only dirty signature, and an explicit flush-to-disk save | [08](docs/pencilpot/architecture/08-working-copy-dirty-persistence.md) |
+| **Local profile, zero network** | A local user with no auth and no profile RPCs leaving the machine | [09](docs/pencilpot/architecture/09-local-profile-rpc-removal.md) |
+| **Native save UI** | A no-injection save control + workspace header, wired to the dirty model | [10](docs/pencilpot/architecture/10-native-save-ui.md) |
+| **Prototype view mode** | Play a prototype in a separate, exitable viewer window (boot warmup + read-session cache) | [11](docs/pencilpot/architecture/11-view-mode.md) |
+| **Headless engine + AI-dev** | An MCP server + WorkingCopy SDK that let an AI author designs in code | [12](docs/pencilpot/architecture/12-headless-engine-and-ai-dev.md) |
 
-The [MCP server](https://penpot.app/penpot-mcp-server) takes it further by enabling multi-directional workflows between design and code. A [powerful open API](https://help.penpot.app/mcp/#quick-start) and plugin system makes the workspace programmable, enabling automation, AI-driven workflows, and integrations with the tools and systems you already use.
+---
 
-With [CSS Grid and Flex Layout](https://help.penpot.app/user-guide/designing/flexible-layouts/), teams can design responsive interfaces that behave like real code from the start.
+## Quick start
 
-Combined, these features turn Penpot into a **full-stack design platform** for building scalable design systems and fully integrated product development processes.
+```bash
+# 1. Scaffold a new project (includes a starter design + a git repo)
+pencilpot new my-project
 
-If your organization is scaling and needs extra support, we’re here to help. [Talk to us](https://penpot.app/talk-to-us)
+# 2. Open it — starts the runtime and opens the editor window
+pencilpot open my-project/my-project.pencil
 
-## Table of contents ##
+# 3. Register as a desktop app so double-clicking *.pencil opens the editor
+pencilpot install-desktop
+```
 
-- [Why Penpot](#why-penpot)
-- [Getting Started](#getting-started)
-- [Community](#community)
-- [Contributing](#contributing)
-- [Resources](#resources)
-- [License](#license)
+### CLI commands
 
-## Why Penpot ##
+| Command | Purpose |
+|---|---|
+| `new <name\|dir> [--design <d>]` | Scaffold a `.pencil` project (starter design + git repo) |
+| `open <path\|dir> [--no-window] [--port N]` | Start the runtime and open the editor (`--no-window` for headless) |
+| `import <file.penpot> [dir] [--project <dir>] [--name <design>]` | Import a `.penpot` export into a project |
+| `designs <path\|dir>` / `set-default <path> <design>` | List designs / choose the default |
+| `add-font <file>` · `add-variable-font <file>` · `add-google <Family> [--variable]` | Add custom / variable / Google fonts |
+| `fonts <path\|dir>` | List added fonts + report missing families |
+| `map-variable <project> --font-id <id> --map "Family=wdth:62.5,opsz:120" …` | Map families onto a variable font (rewrites EDN, re-layouts) |
+| `retarget-fonts <project> [--family "Name=fontId"]` | Consolidate duplicate font ids |
+| `install-desktop` / `uninstall-desktop` | Add / remove the OS desktop + MIME integration |
 
-Penpot connects design, code, and AI workflows through a code-based approach, making designs readable by developers and AI via the MCP server. This approach helps teams ship what’s actually designed and manage design systems at scale with powerful design tokens. As a self-hosted, open-source and real-time collaboration platform, Penpot offers full flexibility, security, and ownership without vendor lock-in. Learn more about [why Penpot](https://penpot.app/why-penpot) is the platform for your team.
-
-### Plugin system ###
-
-[Penpot plugins](https://penpot.app/penpothub/plugins) let you expand the platform's capabilities, give you the flexibility to integrate it with other apps, and design custom solutions.
-
-### Designed for developers ###
-
-Penpot was built to serve both designers and developers and create a fluid design-code process. You have the choice to enjoy real-time collaboration or play "solo".
-
-### Inspect mode ###
-
-Work with ready-to-use code and make your workflow easy and fast. The inspect tab gives instant access to SVG, CSS and HTML code.
-
-### Integrations ###
-
-Penpot offers [integration](https://penpot.app/integrations-api) into the development toolchain, thanks to its support for webhooks and an API accessible through access tokens.
-
-### Building Design Systems: design tokens, components and variants ###
-
-Penpot brings [design systems](https://penpot.app/design/design-systems) to code-minded teams: a single source of truth with native Design Tokens, Components, and Variants for scalable, reusable, and consistent UI across projects and platforms.
-
-<img width="100%" alt="Penpot Design Systems" src="https://github.com/user-attachments/assets/cce75ad6-f783-473f-8803-da9eb8255fef">
-
-## Getting started ##
-
-Penpot is the only design & prototype platform that is deployment agnostic. You can use it in our [SAAS](https://design.penpot.app) or deploy it anywhere.
-
-Learn how to install it with Docker, Kubernetes, Elestio or other options on [our website](https://penpot.app/self-host).
-
-## Community ##
-
-We love the Open Source software community. Contributing is our passion and if it’s yours too, participate and [improve](https://community.penpot.app/c/help-us-improve-penpot/7) Penpot. All your designs, code and ideas are welcome!
-
-Want to go a step further? Become a [Penpot Ambassador](https://penpot.app/ambassador-program) and help grow the Penpot community in your region while contributing to a global, open design ecosystem.
-
-If you need help or have any questions; if you’d like to share your experience using Penpot or get inspired; if you’d rather meet our community of developers and designers, [join our Community](https://community.penpot.app/)!
-
-Categories include:
-
-- [Ask the Community](https://community.penpot.app/c/ask-for-help-using-penpot/6)
-- [Troubleshooting](https://community.penpot.app/c/technical/8)
-- [Help us Improve Penpot](https://community.penpot.app/c/help-us-improve-penpot/7)
-- [Events and Announcements](https://community.penpot.app/c/announcements/5)
-- [Penpot in your language](https://community.penpot.app/c/penpot-in-your-language/12)
-- [Education](https://community.penpot.app/c/education/28)
-
-<img width="100%" alt="Pentpot Community" src="https://github.com/user-attachments/assets/4b2a4360-12b5-4994-bd45-641449f86c4e" />
-
-### Code of Conduct ###
-
-Anyone who contributes to Penpot, whether through code, in the community, or at an event, must adhere to the
-[code of conduct](https://help.penpot.app/contributing-guide/coc/) and foster a positive and safe environment.
-
-### Contributing ###
-
-Any contribution will make a difference to improve Penpot. How can you get involved?
-
-Choose your way:
-
-- Create and [share Libraries & Templates](https://penpot.app/libraries-templates.html) that will be helpful for the community.
-- Invite your [team to join](https://design.penpot.app/#/auth/register).
-- Give this repo a star and follow us on Social Media: [Mastodon](https://fosstodon.org/@penpot/), [Youtube](https://www.youtube.com/c/Penpot), [Instagram](https://instagram.com/penpot.app), [Linkedin](https://www.linkedin.com/company/penpotdesign),  [Peertube](https://peertube.kaleidos.net/a/penpot_app), [X](https://twitter.com/penpotapp) and [BlueSky](https://bsky.app/profile/penpot.app).
-- Participate in the [Community](https://community.penpot.app/) space by asking and answering questions; reacting to others’ articles;  opening your own conversations and following along on decisions affecting the project.
-- Report bugs with our easy [guide for bugs hunting](https://help.penpot.app/contributing-guide/reporting-bugs/) or [GitHub issues](https://github.com/penpot/penpot/issues).
-- Become a [translator](https://help.penpot.app/contributing-guide/translations).
-- Give feedback: [Email us](mailto:support@penpot.app).
-- **Contribute to Penpot's code:** [Watch this video](https://www.youtube.com/watch?v=TpN0osiY-8k) by Alejandro Alonso, CIO and developer at Penpot, where he gives us a hands-on demo of how to use Penpot’s repository and make changes in both front and back end.
-
-To find (almost) everything you need to know on how to contribute to Penpot, refer to the [contributing guide](https://help.penpot.app/contributing-guide/).
-
-<img width="100%" alt="Penpot hub" src="https://github.com/user-attachments/assets/0abc02f0-625c-45ab-ad81-4927bec7a055" />
-
-## Resources ##
-
-You can ask and answer questions, have open-ended conversations, and follow along on decisions affecting the project.
-
-💾 [Documentation](https://help.penpot.app/technical-guide/)
-
-🚀 [Getting Started](https://help.penpot.app/technical-guide/getting-started/)
-
-✏️ [Tutorials](https://www.youtube.com/playlist?list=PLgcCPfOv5v54WpXhHmNO7T-YC7AE-SRsr)
-
-🏘️ [Architecture](https://help.penpot.app/technical-guide/developer/architecture/)
-
-📚 [Dev Diaries](https://penpot.app/dev-diaries.html)
-
-🧑‍🏫​ [UI Design Course](https://penpot.app/courses/)
-
-
-## License ##
+### Project layout
 
 ```
-This Source Code Form is subject to the terms of the Mozilla Public
-License, v. 2.0. If a copy of the MPL was not distributed with this
-file, You can obtain one at http://mozilla.org/MPL/2.0/.
-
-Copyright (c) KALEIDOS INC Sucursal en España SL
+my-project/
+├── my-project.pencil   ← JSON manifest (name, designs list, default)
+├── designs/
+│   └── home/           ← EDN store for one design (manifest + pages/ + components/)
+└── shared/             ← shared library assets
 ```
-Penpot is a Kaleidos’ [open source project](https://kaleidos.net/)
+
+---
+
+## Driving Pencilpot with AI
+
+Pencilpot ships a **headless engine** (the real Penpot CLJS data model compiled to an ESM bundle) with
+two AI-facing surfaces over it:
+
+- a **WorkingCopy SDK** (`headless-core/sdk/`) — `checkout → author → validate → commit`, in memory;
+- an **MCP server** (`headless-core/mcp/server.mjs`) exposing `checkout` / `script` / `scene` / `validate`
+  / `status` / `commit` / `discard` / `map_fonts_variable` to any MCP client.
+
+The canonical loop is: boot a runtime, point the SDK at it (`PENPOT_HL_BASE`), then
+`checkout → script → validate → commit` (in memory) and finally **`POST /pencilpot/save`** to flush to
+disk — the one step that makes edits durable.
+
+An AI can build boards, shapes, text, components, layouts, constraints, color tokens, and variable-font
+maps; **place component instances** (`instantiateComponent`); and **wire click→navigate prototypes**
+(`addInteraction`) that the view-mode viewer then plays. For the full WORKS / PARTIAL / GAP capability
+matrix, exact options, and copy-pasteable invocations:
+
+- 🧭 the agent skill — [`pencilpot/skills/pencilpot/SKILL.md`](pencilpot/skills/pencilpot/SKILL.md)
+- 📋 the capability ledger — [`docs/pencilpot/ai-dev-capabilities.md`](docs/pencilpot/ai-dev-capabilities.md)
+
+To activate the skill locally:
+
+```bash
+ln -s "$PWD/pencilpot/skills/pencilpot" ~/.pi/agent/skills/pencilpot
+```
+
+---
+
+## Build & test
+
+The frontend has **two independent build steps** (JS via shadow-cljs `release`, SCSS→CSS separately), and
+the headless engine is its own `:headless` shadow-cljs build (`headless-core/target/headless/penpot.js`).
+See [13 — build & test](docs/pencilpot/architecture/13-build-and-test.md) for the full reality.
+
+```bash
+# Pencilpot product suite — unit + integration (no external backend needed):
+node pencilpot/run-tests.mjs --unit
+
+# All tiers (seeds a project, starts the runtime, runs Playwright):
+node pencilpot/run-tests.mjs
+
+# Headless engine suite — run SERIALLY (its backend-integration tests share one dev backend):
+cd headless-core && node --test --test-concurrency=1 test/*.test.mjs
+```
+
+---
+
+## Repository layout
+
+| Path | What lives here |
+|---|---|
+| [`pencilpot/`](pencilpot/) | The runtime, the `pencilpot` CLI (`bin/`), the EDN store + project model (`store/`), media/import helpers (`runtime/`), the agent skill (`skills/`), and the product + e2e tests (`test/`, `e2e/`). See [`pencilpot/README.md`](pencilpot/README.md). |
+| [`headless-core/`](headless-core/) | The Penpot data model compiled to an ESM engine, plus the WorkingCopy **SDK** (`sdk/`) and the **MCP** server (`mcp/`) that drive it. |
+| [`frontend/`](frontend/) | The Penpot **CLJS/SCSS** app — pencilpot's native (no-injection) changes are compiled into this bundle. |
+| [`docs/pencilpot/`](docs/pencilpot/) | All architecture docs, the AI-dev capability ledger, and the phase-numbered design notes. |
+| `common/`, `render-wasm/`, … | Upstream Penpot modules retained for the data model and renderer. |
+
+---
+
+## License
+
+Inherits Penpot's [MPL-2.0](https://www.mozilla.org/en-US/MPL/2.0). Pencilpot is a downstream,
+local-first reworking of Penpot's frontend + a bespoke Node runtime; it is not affiliated with or
+endorsed by the Penpot project.
