@@ -659,6 +659,56 @@
                            (cll/generate-detach-instance page libraries sid))]
            (apply-changes! state ch)
            js/undefined))
+       :groupShapes
+       ;; Group existing shapes (sharing a parent) into a new :group. Mirrors the
+       ;; UI's prepare-create-group core: create the group (a cts/setup-shape
+       ;; record, so pcb/add-object's check-shape passes even on hydrated designs)
+       ;; already listing the children, add it at the last child's position, then
+       ;; change-parent the children into it. Returns the new group id.
+       (fn [ids-json json]
+         (let [{:keys [name]} (args json)
+               pid     (:page-id @state)
+               objects (objects-of state)
+               ids     (->> (mapv uuid/parse (args ids-json))
+                            (cfh/order-by-indexed-shapes objects))
+               shapes  (mapv #(get objects %) ids)
+               first-s (first shapes)
+               parent-id (:parent-id first-s)
+               frame-id  (:frame-id first-s)
+               selrect (gsh/shapes->rect shapes)
+               gidx    (inc (cfh/get-position-on-parent objects (:id (last shapes))))
+               gid     (uuid/next)
+               group   (cts/setup-shape {:id gid :type :group :name (or name "Group")
+                                         :shapes (mapv :id shapes) :selrect selrect
+                                         :x (:x selrect) :y (:y selrect)
+                                         :width (:width selrect) :height (:height selrect)
+                                         :parent-id parent-id :frame-id frame-id :index gidx})
+               ch      (-> (pcb/empty-changes nil pid)
+                           (pcb/with-page-id pid)
+                           (pcb/with-objects objects)
+                           (pcb/add-object group {:index gidx})
+                           (pcb/change-parent gid (reverse shapes)))]
+           (apply-changes! state ch)
+           (str gid)))
+       :ungroupShape
+       ;; Dissolve a group: relocate its children out to the group's parent at the
+       ;; group's position. cls/generate-relocate auto-removes the now-empty group.
+       (fn [group-id]
+         (let [pid     (:page-id @state)
+               data    (:data @state)
+               objects (:objects (get-in data [:pages-index pid]))
+               gid     (uuid/parse group-id)
+               group   (get objects gid)
+               parent-id (cfh/get-parent-id objects gid)
+               gidx    (inc (cfh/get-position-on-parent objects gid))
+               kids    (->> (:shapes group) (cfh/order-by-indexed-shapes objects) vec)
+               ch      (-> (pcb/empty-changes nil pid)
+                           (pcb/with-page-id pid)
+                           (pcb/with-objects objects)
+                           (pcb/with-library-data data)
+                           (cls/generate-relocate parent-id gidx kids))]
+           (apply-changes! state ch)
+           js/undefined))
        :objects  (fn [] (js/JSON.stringify (->plain-js (get-in (:data @state) [:pages-index (:page-id @state) :objects]))))
        :getShape (fn [id] (js/JSON.stringify (->plain-js (get-in (:data @state) [:pages-index (:page-id @state) :objects (uuid/uuid id)]))))
        :validate (fn []

@@ -39,6 +39,10 @@ export class WorkingCopy {
   swapComponent(instanceId, newComponentId) { return this.session.swapComponent(instanceId, newComponentId); }
   // Detach an instance from its component (becomes a plain shape tree).
   detachInstance(instanceId) { return this.session.detachInstance(instanceId); }
+  // Group existing shapes (sharing a parent) into a new group; returns the group id.
+  groupShapes(ids, opts = {}) { return this.session.groupShapes(JSON.stringify(ids), JSON.stringify(opts)); }
+  // Dissolve a group, lifting its children back to the group's parent.
+  ungroupShape(groupId) { return this.session.ungroupShape(groupId); }
 
   // Add a prototype interaction to a shape. opts:
   //   { shapeId, destination?, eventType?="click", actionType?="navigate", preserveScroll? }
