@@ -23,8 +23,9 @@ Full capability matrix, exact opts, gaps, and worked harnesses:
 ```
 # 1. Boot the runtime (serves the SPA + the RPC API the MCP talks to)
 pencilpot open <project.pencil>          # or: node pencilpot/runtime/server.mjs
-#   env: PENCILPOT_PROJECT=<.pencil dir> [+ PENCILPOT_DESIGN=<name>]  OR  PENCILPOT_DESIGN=<abs design dir>;  PENCILPOT_PORT=<port>
-#   waits for: "pencilpot runtime on http://localhost:<port>"
+#   env: PENCILPOT_PROJECT=<project.pencil or project dir> [+ PENCILPOT_DESIGN=<name>]  OR  PENCILPOT_DESIGN=<abs design dir>;  PENCILPOT_PORT=<port>
+#   waits for: "pencilpot runtime on http://localhost:<port> … fileId=<id>"  (fileId is also in <design>/manifest.edn :id;
+#   the runtime serves the open design for any non-library id, so checkout(fileId) just works)
 
 # 2. Point the headless MCP at the LOCAL runtime
 PENPOT_HL_BASE=http://localhost:<port> PENPOT_TOKEN=local node headless-core/mcp/server.mjs
