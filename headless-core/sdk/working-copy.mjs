@@ -35,6 +35,10 @@ export class WorkingCopy {
 
   createComponent(boardId, opts = {}) { return this.session.createComponent(boardId, JSON.stringify(opts)); }
   instantiateComponent(componentId, opts) { return this.session.instantiateComponent(componentId, JSON.stringify(opts)); }
+  // Replace a component instance with an instance of a different component.
+  swapComponent(instanceId, newComponentId) { return this.session.swapComponent(instanceId, newComponentId); }
+  // Detach an instance from its component (becomes a plain shape tree).
+  detachInstance(instanceId) { return this.session.detachInstance(instanceId); }
 
   // Add a prototype interaction to a shape. opts:
   //   { shapeId, destination?, eventType?="click", actionType?="navigate", preserveScroll? }

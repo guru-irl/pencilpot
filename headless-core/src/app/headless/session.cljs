@@ -10,6 +10,7 @@
    [app.common.geom.point :as gpt]               ; gpt/point (instance position)
    [app.common.types.shape.layout :as ctl]       ; grid cells (add-grid-column/assign-cells/reorder)
    [app.common.types.shape.interactions :as csi] ; prototype interactions (navigate/overlay)
+   [app.common.types.component :as ctk]          ; swap-keep-attrs (component swap)
    [app.common.geom.modifiers :as gm]            ; set-objects-modifiers (layout engine)
    [app.common.types.modifiers :as ctm]          ; reflow-modifiers (seed)
    [app.common.geom.shapes :as gsh]              ; transform-shape (apply modifiers)
@@ -616,6 +617,48 @@
            (do-dim :width width)
            (do-dim :height height)
            (str sid)))
+       :swapComponent
+       ;; Replace a component instance with an instance of a DIFFERENT component,
+       ;; preserving position/size (ctk/swap-keep-attrs). Uses Penpot's own
+       ;; cll/generate-component-swap (delete old + instantiate new). Like
+       ;; instantiateComponent it instantiates, so it needs the same hydrated-data
+       ;; coercion (records + restored :data :id). Returns the new instance root id.
+       (fn [shape-id new-component-id]
+         (let [pid       (:page-id @state)
+               sid       (uuid/parse shape-id)
+               new-cid   (uuid/parse new-component-id)
+               data      (-> (:data @state) (coerce-data-for-validation) (assoc :id file-id))
+               page      (get-in data [:pages-index pid])
+               objects   (:objects page)
+               libraries {file-id {:id file-id :data data}}
+               shape     (get objects sid)
+               parent    (get objects (:parent-id shape))
+               index     (or (first (keep-indexed (fn [i x] (when (= x sid) i)) (:shapes parent))) 0)
+               target-cell (when (ctl/grid-layout? parent) (ctl/get-cell-by-shape-id parent sid))
+               keep-props  (select-keys shape ctk/swap-keep-attrs)
+               [new-shape _ changes]
+               (-> (pcb/empty-changes nil pid)
+                   (cll/generate-component-swap objects shape data page libraries new-cid
+                                                index target-cell keep-props false))]
+           (apply-changes! state changes)
+           (str (:id new-shape))))
+       :detachInstance
+       ;; Detach a component instance (and its children) from its component, so it
+       ;; becomes a plain shape tree. cll/generate-detach-instance strips the
+       ;; :component-*/:shape-ref links via pcb/update-shapes (no cts/check-shape),
+       ;; so it is safe on hydrated plain-map shapes.
+       (fn [shape-id]
+         (let [pid     (:page-id @state)
+               data    (:data @state)
+               page    (get-in data [:pages-index pid])
+               sid     (uuid/parse shape-id)
+               libraries {file-id {:id file-id :data data}}
+               ch      (-> (pcb/empty-changes nil pid)
+                           (pcb/with-page-id pid)
+                           (pcb/with-objects (:objects page))
+                           (cll/generate-detach-instance page libraries sid))]
+           (apply-changes! state ch)
+           js/undefined))
        :objects  (fn [] (js/JSON.stringify (->plain-js (get-in (:data @state) [:pages-index (:page-id @state) :objects]))))
        :getShape (fn [id] (js/JSON.stringify (->plain-js (get-in (:data @state) [:pages-index (:page-id @state) :objects (uuid/uuid id)]))))
        :validate (fn []
