@@ -51,6 +51,64 @@ test("resizeShape changes width and height", () => {
   assert.deepEqual(JSON.parse(s.validate()), [], "validates after resize");
 });
 
+const pointsOf = (s, id) => JSON.parse(s.objects())[id].points;
+
+test("rotateShape rotates about the shape center (real geometry, not a raw :rotation set)", () => {
+  const s = createSession(JSON.stringify({ empty: true, name: "Rotate" }));
+  const b = s.addBoard(JSON.stringify({ x: 0, y: 0, width: 400, height: 400, name: "F" }));
+  const r = s.addRect(JSON.stringify({ x: 100, y: 100, width: 80, height: 40, name: "r" }));
+  s.closeBoard();
+
+  const before = pointsOf(s, r);
+  s.rotateShape(r, JSON.stringify({ angle: 45 }));
+  const shape = JSON.parse(s.objects())[r];
+
+  const rot = ((shape.rotation % 360) + 360) % 360;
+  assert.ok(Math.abs(rot - 45) < 0.5, `:rotation is ~45 (got ${shape.rotation})`);
+
+  // a real rotation moves the corner points; a raw attribute set would not
+  const after = shape.points;
+  const moved = after.some((p, i) => Math.abs(p.x - before[i].x) > 1 || Math.abs(p.y - before[i].y) > 1);
+  assert.ok(moved, "corner :points changed (geometry-correct rotation, not a no-op)");
+
+  // the rotation is about the shape's own center, so the center is preserved
+  const c0 = before.reduce((a, p) => ({ x: a.x + p.x / 4, y: a.y + p.y / 4 }), { x: 0, y: 0 });
+  const c1 = after.reduce((a, p) => ({ x: a.x + p.x / 4, y: a.y + p.y / 4 }), { x: 0, y: 0 });
+  assert.ok(Math.abs(c0.x - c1.x) < 1 && Math.abs(c0.y - c1.y) < 1, "center preserved");
+
+  assert.deepEqual(JSON.parse(s.validate()), [], "validates after rotate");
+});
+
+test("rotateShape about an explicit pivot moves the shape center", () => {
+  const s = createSession(JSON.stringify({ empty: true, name: "RotatePivot" }));
+  const b = s.addBoard(JSON.stringify({ x: 0, y: 0, width: 600, height: 600, name: "F" }));
+  const r = s.addRect(JSON.stringify({ x: 100, y: 100, width: 40, height: 40, name: "r" }));
+  s.closeBoard();
+
+  const before = sel(s, r);
+  s.rotateShape(r, JSON.stringify({ angle: 90, cx: 0, cy: 0 }));
+  const after = sel(s, r);
+  // rotating about (0,0) by 90deg moves the shape away from its origin position
+  const movedFar = Math.abs(after.x - before.x) > 50 || Math.abs(after.y - before.y) > 50;
+  assert.ok(movedFar, "explicit pivot relocates the shape");
+  assert.deepEqual(JSON.parse(s.validate()), [], "validates after pivot rotate");
+});
+
+test("rotateShape persists on a fromStore-hydrated session + round-trip", () => {
+  const s1 = createSession(JSON.stringify({ empty: true, name: "RotHydrated" }));
+  const b = s1.addBoard(JSON.stringify({ x: 0, y: 0, width: 400, height: 400, name: "F" }));
+  const r = s1.addRect(JSON.stringify({ x: 50, y: 50, width: 60, height: 60, name: "r" }));
+  s1.closeBoard();
+
+  const s2 = createSession(JSON.stringify({ fromStore: JSON.parse(s1.serializeStore()) }));
+  s2.rotateShape(r, JSON.stringify({ angle: 30 }));
+  assert.deepEqual(JSON.parse(s2.validate()), [], "hydrated rotate validates");
+
+  const s3 = createSession(JSON.stringify({ fromStore: JSON.parse(s2.serializeStore()) }));
+  const rot = ((JSON.parse(s3.objects())[r].rotation % 360) + 360) % 360;
+  assert.ok(Math.abs(rot - 30) < 0.5, `rotation persisted across round-trip (got ${rot})`);
+});
+
 test("geometry edits persist on a fromStore-hydrated session + round-trip", () => {
   const s1 = createSession(JSON.stringify({ empty: true, name: "Hydrated" }));
   const b = s1.addBoard(JSON.stringify({ x: 0, y: 0, width: 400, height: 400, name: "F" }));

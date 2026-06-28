@@ -14,6 +14,7 @@
    [app.common.geom.modifiers :as gm]            ; set-objects-modifiers (layout engine)
    [app.common.types.modifiers :as ctm]          ; reflow-modifiers (seed)
    [app.common.geom.shapes :as gsh]              ; transform-shape (apply modifiers)
+   [app.common.geom.shapes.common :as gco]       ; shape->center (rotation pivot)
    [app.common.files.validate :as cfv]           ; validate-file-schema! (parity oracle)
    [app.common.types.file :as ctf]               ; make-file-data
    [app.common.types.tokens-lib :as ctob]        ; design tokens (sets/tokens/themes)
@@ -640,6 +641,31 @@
                             (apply-changes! state ch))))]
            (do-dim :width width)
            (do-dim :height height)
+           (str sid)))
+       :rotateShape
+       ;; Rotate an existing shape by `angle` degrees about its own center
+       ;; (or {cx,cy}). Uses ctm/rotation-modifiers through the modifier engine
+       ;; so :rotation AND :selrect/:points are recomputed exactly as in the UI
+       ;; (children of a group/board rotate with it). This is the geometry-correct
+       ;; path; raw :rotation stays refused by updateShapes.
+       (fn [shape-id json]
+         (let [{:keys [angle cx cy]} (args json)
+               pid     (:page-id @state)
+               sid     (uuid/parse shape-id)
+               objects (objects-of state)
+               shape   (get objects sid)
+               center  (if (and (number? cx) (number? cy))
+                         (gpt/point cx cy)
+                         (gco/shape->center shape))
+               tree    {sid {:modifiers (ctm/rotation-modifiers shape center angle)}}
+               res     (gm/set-objects-modifiers tree objects)
+               ids     (vec (keys res))
+               ch      (-> (pcb/empty-changes nil pid)
+                           (pcb/with-page-id pid)
+                           (pcb/with-objects objects)
+                           (pcb/update-shapes ids
+                                              (fn [s] (gsh/transform-shape s (get-in res [(:id s) :modifiers])))))]
+           (apply-changes! state ch)
            (str sid)))
        :swapComponent
        ;; Replace a component instance with an instance of a DIFFERENT component,
