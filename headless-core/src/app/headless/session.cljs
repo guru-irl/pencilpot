@@ -5,6 +5,8 @@
    [app.common.files.changes :as cfc]            ; process-changes (apply to file-data)
    [app.common.files.changes-builder :as pcb]    ; update-shapes -> :mod-obj diffs
    [app.common.logic.libraries :as cll]          ; generate-instantiate-component
+   [app.common.logic.shapes :as cls]             ; generate-delete-shapes / generate-relocate
+   [app.common.files.helpers :as cfh]            ; get-parent-id (reorder within parent)
    [app.common.geom.point :as gpt]               ; gpt/point (instance position)
    [app.common.types.shape.layout :as ctl]       ; grid cells (add-grid-column/assign-cells/reorder)
    [app.common.types.shape.interactions :as csi] ; prototype interactions (navigate/overlay)
@@ -422,6 +424,83 @@
                                               (fn [s] (update s :interactions csi/add-interaction inter))))]
            (apply-changes! state ch)
            (js/JSON.stringify (->plain-js inter))))
+       :updateShapes
+       ;; Generic attribute edit on EXISTING shapes (closes the "append-only" gap).
+       ;; ids: JSON array of shape ids; attrs: JSON object of shape attributes to
+       ;; merge (fills/strokes/opacity/rotation/name/blend-mode/constraints-h/v/
+       ;; rx/ry/r1..r4/hidden/blocked/proportion-lock/…). args() keywordizes nested
+       ;; map keys, so fills/strokes arrive in Penpot shape form; we keyword-coerce
+       ;; known enum-VALUED attrs. Raw pcb/update-shapes (the setFlexLayout path)
+       ;; does NOT run cts/check-shape -> safe on hydrated plain-map shapes.
+       ;; Returns the count of shapes updated.
+       (fn [ids-json attrs-json]
+         (let [pid     (:page-id @state)
+               objects (objects-of state)
+               ids     (mapv uuid/parse (args ids-json))
+               raw     (args attrs-json)
+               enum-ks #{:constraints-h :constraints-v :blend-mode :grow-type
+                         :vertical-align :horizontal-align :type}
+               attrs   (reduce-kv (fn [m k v]
+                                    (assoc m k (if (and (contains? enum-ks k) (string? v))
+                                                 (keyword v) v)))
+                                  {} raw)
+               ids'    (filterv #(contains? objects %) ids)
+               ch      (-> (pcb/empty-changes nil pid)
+                           (pcb/with-page-id pid)
+                           (pcb/with-objects objects)
+                           (pcb/update-shapes ids' (fn [s] (merge s attrs))
+                                              {:attrs (set (keys attrs))}))]
+           (apply-changes! state ch)
+           (count ids')))
+       :deleteShapes
+       ;; Delete EXISTING shapes (and their descendants) via Penpot's own
+       ;; generator, which handles component copies (hidden not deleted), masks,
+       ;; and empty-group cleanup. Returns the count requested. No cts/check-shape
+       ;; on this path, so hydrated plain-map shapes are fine.
+       (fn [ids-json]
+         (let [pid     (:page-id @state)
+               data    (:data @state)
+               page    (get-in data [:pages-index pid])
+               objects (:objects page)
+               ids     (filterv #(contains? objects %) (mapv uuid/parse (args ids-json)))
+               [_ ch]  (-> (pcb/empty-changes nil pid)
+                           (cls/generate-delete-shapes data page objects ids {}))]
+           (when (seq ids) (apply-changes! state ch))
+           (count ids)))
+       :reparentShape
+       ;; Move an existing shape under a new parent (board/group/frame) at an
+       ;; optional index. cls/generate-relocate emits the :mov-objects + parent
+       ;; registration + empty-group cleanup the UI uses. opts: {parentId, index?}.
+       (fn [shape-id json]
+         (let [{:keys [parentId index]} (args json)
+               pid     (:page-id @state)
+               data    (:data @state)
+               objects (:objects (get-in data [:pages-index pid]))
+               sid     (uuid/parse shape-id)
+               par     (uuid/parse parentId)
+               ch      (-> (pcb/empty-changes nil pid)
+                           (pcb/with-page-id pid)
+                           (pcb/with-objects objects)
+                           (pcb/with-library-data data)
+                           (cls/generate-relocate par (or index 0) [sid]))]
+           (apply-changes! state ch)
+           (str sid)))
+       :reorderShape
+       ;; Change z-order: relocate the shape within its CURRENT parent to `index`.
+       (fn [shape-id json]
+         (let [{:keys [index]} (args json)
+               pid     (:page-id @state)
+               data    (:data @state)
+               objects (:objects (get-in data [:pages-index pid]))
+               sid     (uuid/parse shape-id)
+               par     (cfh/get-parent-id objects sid)
+               ch      (-> (pcb/empty-changes nil pid)
+                           (pcb/with-page-id pid)
+                           (pcb/with-objects objects)
+                           (pcb/with-library-data data)
+                           (cls/generate-relocate par (or index 0) [sid]))]
+           (apply-changes! state ch)
+           (str sid)))
        :objects  (fn [] (js/JSON.stringify (->plain-js (get-in (:data @state) [:pages-index (:page-id @state) :objects]))))
        :getShape (fn [id] (js/JSON.stringify (->plain-js (get-in (:data @state) [:pages-index (:page-id @state) :objects (uuid/uuid id)]))))
        :validate (fn []

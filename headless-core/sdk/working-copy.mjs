@@ -42,6 +42,19 @@ export class WorkingCopy {
   // Returns the created interaction map.
   addInteraction(opts) { return JSON.parse(this.session.addInteraction(JSON.stringify(opts))); }
 
+  // --- editing EXISTING shapes (structural control, not append-only) ---------
+  // Merge attributes onto existing shapes (fills/strokes/opacity/rotation/name/
+  // blend-mode/constraints-h/v/rx/ry/r1..r4/hidden/blocked/proportion-lock/…).
+  updateShape(id, attrs)   { return this.session.updateShapes(JSON.stringify([id]), JSON.stringify(attrs)); }
+  updateShapes(ids, attrs) { return this.session.updateShapes(JSON.stringify(ids), JSON.stringify(attrs)); }
+  // Delete shapes (and descendants). Component-copy children are hidden, not deleted.
+  deleteShape(id)   { return this.session.deleteShapes(JSON.stringify([id])); }
+  deleteShapes(ids) { return this.session.deleteShapes(JSON.stringify(ids)); }
+  // Reparent a shape under a new board/group/frame at an optional index.
+  reparentShape(id, parentId, { index } = {}) { return this.session.reparentShape(id, JSON.stringify({ parentId, index })); }
+  // Change z-order within the current parent.
+  reorderShape(id, index) { return this.session.reorderShape(id, JSON.stringify({ index })); }
+
   // Map families onto a variable font WITH per-family axis settings (wdth/opsz/…).
   // mapping: { "Family Name": { fontId, family, axes: { wdth: 62.5, opsz: 120 } } }.
   // NOTE: this is a whole-file :data transform (not a recorded change), so it does
