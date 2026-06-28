@@ -19,11 +19,13 @@
    [app.common.types.file :as ctf]               ; make-file-data
    [app.common.types.tokens-lib :as ctob]        ; design tokens (sets/tokens/themes)
    [app.common.types.token :as cto]              ; token-types + apply/unapply-token-to-shape
+   [app.common.files.tokens :as cft]             ; parse-token-value / is-reference? (literal token resolution)
    [app.common.transit :as t]                    ; decode-str / encode-str (wire + record handlers)
    [app.common.uuid :as uuid]
    [app.common.geom.matrix]                       ; side-effect: transit handler
    [app.common.geom.point]                        ; side-effect: transit handler
    [app.pencilpot.store :as store]               ; canonical-EDN store serializer
+   [clojure.string :as str]
    [clojure.walk :as walk]))
 
 (def ^:private root-frame uuid/zero)              ; page root frame id
@@ -375,11 +377,35 @@
                _       (when (nil? tok)
                          (throw (ex-info (str "applyToken: no token named " (pr-str token)) {})))
                attrs   (set (map keyword attributes))
+               tv      (:value tok)
+               ref?    (and (string? tv) (cft/is-reference? tok))
+               ;; literal resolution (best-effort): 6-digit hex colors and plain
+               ;; numerics. References ({…})/math + geometry/text attrs are left to
+               ;; the tokens runtime; the binding below is recorded either way.
+               hex     (when (and (string? tv) (not ref?)
+                                  (re-matches #"\s*#[0-9a-fA-F]{6}\s*" tv))
+                         (str/lower-case (str/trim tv)))
+               num     (when (and (string? tv) (not ref?))
+                         (:value (cft/parse-token-value tv)))
+               resolve (fn [s0]
+                         (let [s (cto/apply-token-to-shape {:shape s0 :token tok :attributes attrs})]
+                           (cond-> s
+                             (and hex (attrs :fill))
+                             (assoc :fills [{:fill-color hex :fill-opacity 1}])
+                             (and hex (attrs :stroke-color) (seq (:strokes s)))
+                             (assoc-in [:strokes 0 :stroke-color] hex)
+                             (and (number? num) (attrs :opacity) (<= 0 num 1))
+                             (assoc :opacity num)
+                             (and (number? num) (attrs :r1)) (assoc :r1 (max 0 num))
+                             (and (number? num) (attrs :r2)) (assoc :r2 (max 0 num))
+                             (and (number? num) (attrs :r3)) (assoc :r3 (max 0 num))
+                             (and (number? num) (attrs :r4)) (assoc :r4 (max 0 num))
+                             (and (number? num) (attrs :stroke-width) (seq (:strokes s)))
+                             (assoc-in [:strokes 0 :stroke-width] num))))
                ch      (-> (pcb/empty-changes nil pid)
                            (pcb/with-page-id pid)
                            (pcb/with-objects objects)
-                           (pcb/update-shapes [sid]
-                                              (fn [s] (cto/apply-token-to-shape {:shape s :token tok :attributes attrs}))))]
+                           (pcb/update-shapes [sid] resolve))]
            (apply-changes! state ch)
            js/undefined))
        :unapplyToken
