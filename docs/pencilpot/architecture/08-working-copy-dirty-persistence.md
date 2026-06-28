@@ -73,7 +73,7 @@ _savedSig   content signature of the last-SAVED (on-disk) working copy   ← the
 parts** and recomputes dirty as `computeSig(parts) !== _savedSig`. `save()` writes through `writeDesign`
 and re-baselines `_savedSig`; `discard()` reloads disk and re-baselines. (The `_store` reassignment in
 `stage`/`discard` is also what the read-session cache keys on for identity-based invalidation —
-`rpc.mjs:35-52`.)
+`rpc.mjs:53-62`.)
 
 ---
 

@@ -10,7 +10,7 @@
 **Updated:** Phase 4 media flow complete (import re-keying, runtime serve route,
 local upload/from-url/clone RPCs, store-model integration). Commit chain
 `0ca3a22408` → `61676f812c` → `1d23c6f2d9` → `f2cfaf7c5c` → `90399b78e3` →
-`eb76c31feb`. Plan: [`2026-06-21-pencilpot-media-flow.md`](../superpowers/plans/2026-06-21-pencilpot-media-flow.md).
+`eb76c31feb`. Plan: [`2026-06-21-pencilpot-media-flow.md`](../../superpowers/plans/2026-06-21-pencilpot-media-flow.md).
 
 ---
 
