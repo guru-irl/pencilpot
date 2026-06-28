@@ -54,6 +54,10 @@ export class WorkingCopy {
   reparentShape(id, parentId, { index } = {}) { return this.session.reparentShape(id, JSON.stringify({ parentId, index })); }
   // Change z-order within the current parent.
   reorderShape(id, index) { return this.session.reorderShape(id, JSON.stringify({ index })); }
+  // Move a shape (and its subtree) to an absolute {x,y} or by a relative {dx,dy}.
+  moveShape(id, opts) { return this.session.moveShape(id, JSON.stringify(opts)); }
+  // Resize a shape to {width?,height?}; children reflow via the modifier engine.
+  resizeShape(id, opts) { return this.session.resizeShape(id, JSON.stringify(opts)); }
 
   // Map families onto a variable font WITH per-family axis settings (wdth/opsz/…).
   // mapping: { "Family Name": { fontId, family, axes: { wdth: 62.5, opsz: 120 } } }.

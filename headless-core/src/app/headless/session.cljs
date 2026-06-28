@@ -501,6 +501,51 @@
                            (cls/generate-relocate par (or index 0) [sid]))]
            (apply-changes! state ch)
            (str sid)))
+       :moveShape
+       ;; Move an existing shape (and its whole subtree) to an absolute position
+       ;; {x,y} or by a relative delta {dx,dy}. A pure translation: apply gsh/move
+       ;; with the same vector to the shape + every descendant, so groups/frames
+       ;; carry their children. Absolute target is measured from the shape's selrect.
+       (fn [shape-id json]
+         (let [{:keys [x y dx dy]} (args json)
+               pid     (:page-id @state)
+               objects (objects-of state)
+               sid     (uuid/parse shape-id)
+               sr      (:selrect (get objects sid))
+               v       (gpt/point (cond (some? dx) dx (some? x) (- x (:x sr)) :else 0)
+                                  (cond (some? dy) dy (some? y) (- y (:y sr)) :else 0))
+               ids     (into [sid] (cfh/get-children-ids objects sid))
+               ch      (-> (pcb/empty-changes nil pid)
+                           (pcb/with-page-id pid)
+                           (pcb/with-objects objects)
+                           (pcb/update-shapes ids (fn [s] (gsh/move s v))))]
+           (apply-changes! state ch)
+           (str sid)))
+       :resizeShape
+       ;; Resize an existing shape to {width?,height?}. Uses Penpot's own dimension
+       ;; modifiers through the layout/modifier engine (gm/set-objects-modifiers),
+       ;; so children reflow/scale exactly as in the UI. Width and height are
+       ;; applied as separate passes (the engine recomputes geometry between them).
+       (fn [shape-id json]
+         (let [{:keys [width height]} (args json)
+               pid    (:page-id @state)
+               sid    (uuid/parse shape-id)
+               do-dim (fn [attr value]
+                        (when (number? value)
+                          (let [objects (objects-of state)
+                                shape   (get objects sid)
+                                tree    {sid {:modifiers (ctm/change-dimensions-modifiers shape attr value)}}
+                                res     (gm/set-objects-modifiers tree objects)
+                                ids     (vec (keys res))
+                                ch      (-> (pcb/empty-changes nil pid)
+                                            (pcb/with-page-id pid)
+                                            (pcb/with-objects objects)
+                                            (pcb/update-shapes ids
+                                                               (fn [s] (gsh/transform-shape s (get-in res [(:id s) :modifiers])))))]
+                            (apply-changes! state ch))))]
+           (do-dim :width width)
+           (do-dim :height height)
+           (str sid)))
        :objects  (fn [] (js/JSON.stringify (->plain-js (get-in (:data @state) [:pages-index (:page-id @state) :objects]))))
        :getShape (fn [id] (js/JSON.stringify (->plain-js (get-in (:data @state) [:pages-index (:page-id @state) :objects (uuid/uuid id)]))))
        :validate (fn []
