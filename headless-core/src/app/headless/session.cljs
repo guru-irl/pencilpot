@@ -361,9 +361,18 @@
          (let [{:keys [x y]} (args json)
                cid       (uuid/parse component-id)
                pid       (:page-id @state)
-               data      (:data @state)
+               ;; Hydrated-from-disk :data is plain maps and (crucially) lost its
+               ;; :id key, so the generator would (a) clone plain maps that fail
+               ;; pcb/add-object's cts/check-shape ([:fn shape?] => Shape record) and
+               ;; (b) stamp the instance root with :component-file (:id data) = nil
+               ;; (schema wants a uuid). Coerce shapes -> records AND restore :id so
+               ;; the produced instance matches what a real make-file-data session
+               ;; yields. Read-only on LIVE state: only the emitted changes are applied.
+               data      (-> (:data @state)
+                             (coerce-data-for-validation)
+                             (assoc :id file-id))
                page      (get-in data [:pages-index pid])
-               objects   (objects-of state)
+               objects   (:objects page)
                libraries {file-id {:id file-id :data data}}
                changes0  (-> (pcb/empty-changes nil pid)
                              (pcb/with-page-id pid)
