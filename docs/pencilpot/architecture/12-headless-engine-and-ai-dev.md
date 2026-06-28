@@ -100,8 +100,9 @@ stringifies UUIDs via `stringify-uuids`/`->plain-js`). Grouped:
 |---|---|---|
 | **Authoring** | `addBoard` `closeBoard` `addRect` `addEllipse`(`:circle`) `addText` | `mk-shape` → `cts/setup-shape`; `add-shape!` builds+applies+records a `:add-obj`. Parenting is a STACK: `addBoard` pushes the board as active `:frame-id`+parent; `closeBoard` pops. `addText` runs `txt/change-text` and `dissoc`s `:position-data`. |
 | **Layout** | `setFlexLayout` `setGridLayout` `setGrowType` `setConstraints` | (A) `pcb/update-shapes` writes the layout attrs onto the board; (B) reflow children through Penpot's OWN engine — `ctm/reflow-modifiers` seed → `gm/set-objects-modifiers` → `gsh/transform-shape`. Grid builds tracks via `ctl/add-grid-column`/`assign-cells`/`reorder-grid-children`. |
-| **Components** | `createComponent` `instantiateComponent` | `createComponent` promotes an existing board: raw `:add-component` + `:mod-obj` (sets `:component-root`/`:main-instance`/`:component-id`/`:component-file`). `instantiateComponent` calls `cll/generate-instantiate-component` over **records + `:data` `:id`-restored** (coerce-for-validation), so it works on hydrated designs too (fix `01cc717d26`). |
-| **Tokens** | `addColorToken` `tokens` | FILE-level `TokensLib`: `pcb/with-library-data` + `set-token-set`/`set-token` + a hidden theme that enables the set (mirrors frontend `create-token-with-set`). `:type :color` only. |
+| **Components** | `createComponent` `instantiateComponent` `swapComponent` `detachInstance` | `createComponent` promotes an existing board: raw `:add-component` + `:mod-obj` (sets `:component-root`/`:main-instance`/`:component-id`/`:component-file`). `instantiateComponent` calls `cll/generate-instantiate-component` over **records + `:data` `:id`-restored** (coerce-for-validation), so it works on hydrated designs too (fix `01cc717d26`). `swapComponent` uses the SAME coercion + `cll/generate-component-swap`; `detachInstance` uses `cll/generate-detach-instance` (plain-map safe). |
+| **Edit existing shapes** | `updateShapes` `deleteShapes` `reparentShape` `reorderShape` `moveShape` `resizeShape` `groupShapes` `ungroupShape` | All over the engine's high-level generators, plain-map safe (no `cts/check-shape`). `updateShapes` = raw `pcb/update-shapes` with a structural/geometry-key denylist. `delete` = `cls/generate-delete-shapes`; `reparent`/`reorder`/`ungroup` = `cls/generate-relocate` (auto-cleans emptied groups). `moveShape` translates the subtree (`gsh/move`) + `pcb/resize-parents` for ancestors; `resizeShape` = `ctm/change-dimensions-modifiers` through `gm/set-objects-modifiers`. `groupShapes` adds a `cts/setup-shape` `:group` record + `pcb/change-parent`. |
+| **Tokens** | `addToken` `addColorToken` `applyToken` `unapplyToken` `tokens` | FILE-level `TokensLib`: `pcb/with-library-data` + `set-token-set`/`set-token` + the existing hidden theme enabled additively (mirrors frontend `create-token-with-set`). `addToken` passes `:type` to `ctob/make-token` (ALL types; fail-fast on invalid). `applyToken`/`unapplyToken` write the shape's `:applied-tokens` via `cto/apply-token-to-shape`. |
 | **Fonts** | `mapFontsToVariable` `retargetFonts` | whole-`:data` `walk/postwalk`: rewrite `:font-id`/`:font-family`/`:font-variant-id`, merge axis map into `:font-variation-settings`, strip stale `:position-data`. NOT a recorded change → does not round-trip `commit()` (doc `06`; persist via CLI). |
 | **Changes** | `applyChanges` `applyTransitUpdate` `pendingChanges` `clearChanges` `commitBody` `bumpRevn` | `applyTransitUpdate` (canonical) decodes a transit `update-file` body and applies its `:changes` VERBATIM; `commitBody` encodes the accumulated `:changes` into an `update-file` transit body. |
 | **Serialize** | `serializeStore` `loadStore` | canonical-EDN parts (doc `01`). |
@@ -223,16 +224,20 @@ the cache (read-after-write is fresh). See doc `11` for the cache/warmup.
 
 ## Known GAPs (architecture cause; full matrix in `../ai-dev-capabilities.md`)
 
-- **Color tokens only** (`addColorToken` wires `:type :color`); no typography/spacing/binding.
+- **Component variants** (creating variant *sets*) — `swapComponent` works, but variant-set authoring has no verb.
+- **Rotate** — no `rotateShape` verb yet; `updateShapes` refuses raw `:rotation` (geometry would be inconsistent).
+- **Token value resolution** — `applyToken` records the `:applied-tokens` binding; the value resolves under the tokens runtime, not at author time.
 - **`mapFontsToVariable` is a `:data` transform, not a recorded change** → does not round-trip `commit()`;
   persist variable-font remaps with the `pencilpot map-variable` CLI (doc `06`).
-- **Append-only structural authoring** — no reposition/resize/reparent/delete/group beyond layout/grow/constraints.
 
-**Closed (engine follow-ups):** `instantiateComponent` now works on hydrated designs (`01cc717d26`: clone
-over `Shape` records + restored `:data` `:id`, which was `nil` → invalid `:component-file`), and
-**`addInteraction`** authors prototype links headlessly (`5268503075`: builds a schema-valid interaction
-via the `interactions` helpers, appended through `pcb/update-shapes` — no `check-shape`, safe on plain-map
-hydrated shapes). The viewer (doc `11`) plays authored navigates the same as imported ones.
+**Closed (engine follow-ups):** `instantiateComponent` on hydrated designs (`01cc717d26`: clone over `Shape`
+records + restored `:data` `:id`, which was `nil` → invalid `:component-file`); `addInteraction` prototype
+authoring (`5268503075`); and the **SDK full-control waves** (`267c9dadc5`·`42b5012dbc`·`bf177af750`·
+`96cb0f5f6d`·`11adf98831`·`8fe3190c8d`) which turned “append-only” into full structural editing of existing
+shapes (update/move/resize/delete/reparent/reorder/group), tokens of **all** types + binding, and
+component **swap**/detach. The pattern is identical throughout: a thin verb over an existing `cls/`/`cll/`/
+`ctob/` generator + `apply-changes!`; verbs that don't instantiate are plain-map safe (no `cts/check-shape`),
+verbs that do (swap) reuse the instantiate coercion. All verified on hydrated sessions + store round-trips.
 
 For the full WORKS/PARTIAL/GAP capability matrix, exact opts, env vars, and copy-pasteable invocations see
 **`../ai-dev-capabilities.md`** and the **`pencilpot/skills/pencilpot/SKILL.md`** skill.

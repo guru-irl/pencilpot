@@ -56,11 +56,32 @@ POST http://localhost:<port>/pencilpot/discard              # drop staged edits 
 | `wc.createComponent(boardId,{name?})` | promotes a board into a main component |
 | `wc.instantiateComponent(componentId,{x,y})` | places a copy of a main component |
 | `wc.addInteraction({shapeId,destination,eventType?,actionType?,preserveScroll?})` | wires a prototype link (default click→navigate) |
-| `wc.addColorToken({set,name,value})` / `wc.tokens()` | color token (name uses `.` for groups, `/` invalid) |
+| `wc.addColorToken({set,name,value})` — alias of `wc.addToken({...,type:"color"})` |
 | `wc.serializeStore()` / `wc.validate()` / `wc.pendingChanges()` / `wc.tokens()` | introspection (the MCP `scene()` tool returns the id→shape map) |
 
 **Order matters:** add children → THEN set layout (setters reflow existing children). `closeBoard()` is
 stack-based: close a board before starting an unrelated sibling.
+
+## Editing & restructuring EXISTING shapes (all WORK)
+
+| Call | Result |
+|---|---|
+| `wc.updateShape(id,{name?,opacity?,fills?,strokes?,blendMode?,constraintsH?,hidden?,…})` / `wc.updateShapes(ids,attrs)` | merge non-structural attrs onto existing shapes |
+| `wc.moveShape(id,{x,y})` or `{dx,dy}` | move a shape (carries its whole subtree; ancestors reflow) |
+| `wc.resizeShape(id,{width?,height?})` | resize (children reflow via the modifier engine) |
+| `wc.deleteShape(id)` / `wc.deleteShapes(ids)` | delete shapes (+ descendants; component-copy children are hidden) |
+| `wc.reparentShape(id,parentId,{index?})` | move under a new board/group/frame |
+| `wc.reorderShape(id,index)` | change z-order within the parent |
+| `wc.groupShapes(ids,{name?})` / `wc.ungroupShape(groupId)` | group / dissolve a group |
+| `wc.swapComponent(instanceId,newComponentId)` | replace an instance with another component |
+| `wc.detachInstance(id)` | unlink an instance from its component |
+| `wc.addToken({set,name,type,value})` | token of ANY type: color/spacing/sizing/dimension/border-radius/opacity/rotation/font-size/typography… |
+| `wc.applyToken(id,{token,attributes:[…]})` / `wc.unapplyToken(id,attributes)` | bind/unbind a token to shape attrs (`fill`,`stroke-color`,`width`,`height`,`r1`..`r4`,`p1`..`p4`,…) |
+
+> `updateShape` **refuses** identity/structure/geometry keys (`id`/`type`/`shapes`/`parent-id`/`selrect`/
+> `x`/`y`/`width`/`height`/`rotation`/…) and throws — use `moveShape`/`resizeShape`/`reparentShape`/
+> `reorderShape`/`groupShapes`/`applyToken`/`addInteraction` for those. Everything edits in memory; persist
+> with **`commit()` then `POST /pencilpot/save`** (the save gap) as usual.
 
 ## Variable fonts (CLI is the persistence path)
 
@@ -81,13 +102,14 @@ for overlay/url/prev-screen). Pencilpot then **plays** the prototype — importe
 yours: the play button opens `/view` in a separate window; `get-view-only-bundle` feeds the native
 viewer; hotspot clicks navigate frames.
 
-## GAPs — do NOT attempt these via SDK/MCP (they fail or don't exist)
+## GAPs — the few things still missing via SDK/MCP
 
 | Want | Reality | Do instead |
 |---|---|---|
-| Typography/spacing/dimension tokens, token→shape binding | only `:color` tokens are wired | UI for other token types |
-| Move/resize/reparent/delete/group an existing shape | append-only authoring (only layout/grow/constraints mod existing shapes) | UI for structural edits |
-| Component variants/swap | no surface | UI |
+| Component **variants** (variant sets) | `swapComponent` works; creating variant *sets* has no verb yet | UI for variants |
+| **Rotate** a shape | no `rotateShape` verb yet (raw `rotation` is refused for consistency) | UI for rotation |
+| Token **value resolution** onto attributes | `applyToken` records the binding; the value resolves under the tokens runtime, not at author time | binding persists; open the design to resolve |
+| `mapFontsToVariable` round-trip | doesn't persist via `commit()` | use the `map-variable` CLI |
 
 ## Common mistakes
 

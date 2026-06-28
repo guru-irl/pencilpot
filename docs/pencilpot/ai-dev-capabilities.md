@@ -62,13 +62,19 @@ An AI dev loop MUST save explicitly, or the edit is lost on restart/discard. Pol
 | `setConstraints(id,{h,v})` | WORKS | h:left\|right\|leftright\|center\|scale; v:top\|bottom\|topbottom\|center\|scale |
 | `createComponent(boardId,{name?})` | WORKS | promotes a BOARD into a main component |
 | `instantiateComponent(componentId,{x,y})` | WORKS | places a copy of a main component (carries `:shape-ref`/`:component-*`); fixed for hydrated designs in `01cc717d26` |
+| `updateShape(id,attrs)` / `updateShapes(ids,attrs)` | WORKS | merge non-structural attrs (fills/strokes/opacity/blend/constraints/name/hidden/…); refuses structural/geometry keys |
+| `moveShape(id,{x,y}\|{dx,dy})` / `resizeShape(id,{width?,height?})` | WORKS | geometry via the modifier engine; subtree + ancestors reflow |
+| `deleteShape(id)` / `deleteShapes(ids)` | WORKS | delete + descendants (component-copy children hidden) |
+| `reparentShape(id,parentId,{index?})` / `reorderShape(id,index)` | WORKS | move under a new parent / change z-order (`cls/generate-relocate`) |
+| `groupShapes(ids,{name?})` / `ungroupShape(groupId)` | WORKS | wrap shapes in a `:group` / dissolve it |
+| `swapComponent(instanceId,newComponentId)` / `detachInstance(id)` | WORKS | swap an instance to another component / unlink it |
 
 ### Design-system assets
 | Surface | Status | Notes |
 |---|---|---|
 | `addColorToken({set,name,value})` + `tokens()` | WORKS | persists to `<design>/manifest.edn`; name uses `.` for groups, `/` invalid |
-| Non-color tokens (typography/spacing/dimension/…) | **GAP** | engine wires `:type :color` only |
-| Token → shape binding / themes / set management | **GAP** | no SDK/MCP surface |
+| `addToken({set,name,type,value})` (all types) | WORKS | color/spacing/sizing/dimension/border-radius/opacity/rotation/font-size/typography… (fail-fast on bad type) |
+| `applyToken(id,{token,attributes})` / `unapplyToken` | WORKS | binds a token to shape attrs via `:applied-tokens` (value resolves under the tokens runtime) |
 | CLI `pencilpot map-variable <project> --font-id … --map "Fam=wdth:..,opsz:.."` | WORKS | the supported variable-font persistence path; strips stale position-data |
 | MCP `map_fonts_variable` / `wc.mapFontsToVariable` | PARTIAL | whole-file `:data` transform, records NO change → does NOT round-trip `commit()`; persist via CLI |
 | CLI `pencilpot fonts <project>` | WORKS | lists custom fonts + missing-families report |
@@ -93,12 +99,16 @@ An AI dev loop MUST save explicitly, or the edit is lost on restart/discard. Pol
 ---
 
 ## 3. Confirmed GAPs (what an AI cannot do today) + workarounds
-1. **Only color tokens**; no typography/spacing/binding/themes.
-2. **Append-only structural authoring**: no reposition/resize/reparent/delete/group verbs beyond layout/grow/constraints.
-3. **Variant / component-swap** authoring: none.
+1. **Component variants** (creating variant *sets*) — `swapComponent` works, but authoring variant sets has no verb.
+2. **Rotate** — no `rotateShape` verb yet (raw `:rotation` is refused by `updateShape` for geometry consistency).
+3. **Token value RESOLUTION** — `applyToken` records the binding; the value resolves under the tokens runtime, not at author time.
 4. **`mapFontsToVariable` doesn't round-trip `commit()`** → persist variable-font remaps with the CLI.
 
-> **Closed since the first audit:** `instantiateComponent` (now works on hydrated designs — `01cc717d26`) and **prototype interaction authoring** (`wc.addInteraction` — `5268503075`). Both are verified end-to-end (author/place → commit → save → cold reopen persists; viewer plays authored navigates).
+> **Closed by the SDK full-control waves** (`267c9dadc5`·`42b5012dbc`·`bf177af750`·`96cb0f5f6d`·`11adf98831`·`8fe3190c8d`):
+> structural editing of existing shapes (update/move/resize/delete/reparent/reorder/group/ungroup),
+> tokens of **all** types + token→shape binding, and component **swap**/detach — all verified on
+> hydrated (disk) sessions + store round-trips. Earlier closures: `instantiateComponent` (`01cc717d26`)
+> and interaction authoring `addInteraction` (`5268503075`).
 
 ---
 
