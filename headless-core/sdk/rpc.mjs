@@ -19,7 +19,10 @@ export async function getFile(fileId, token) {
   const transit = (await call("get-file", {
     token, body: JSON.stringify({ id: fileId }), accept: "application/transit+json",
   })).text;
-  return { revn: meta.revn, vern: meta.vern, features: meta.features, pageId: meta.data.pages[0], dataTransit: transit, raw: meta };
+  // pageId is unused by WorkingCopy.checkout; guard it so a runtime whose get-file
+  // JSON meta carries `data` as a RAW transit blob (pencilpot) doesn't crash here.
+  // Real Penpot backends decode `data` to {pages:[...]} -> same value; pencilpot -> undefined.
+  return { revn: meta.revn, vern: meta.vern, features: meta.features, pageId: meta?.data?.pages?.[0], dataTransit: transit, raw: meta };
 }
 
 // update-file with a transit body produced by the session's commitBody().
