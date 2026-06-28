@@ -101,10 +101,14 @@ try {
   const val = callJson(await client.callTool({ name: "validate", arguments: {} }));
   check(Array.isArray(val), `[MCP] validate runs and returns an array (issues=${Array.isArray(val) ? val.length : "n/a"})`);
 
-  // FINDING #2: commit is gated by validate; runtime-hydrated :data fails check-file-data.
+  // Finding #2 is now FIXED for the hydration bug: fresh / AI-authored designs
+  // validate clean and commit() works end to end (see commit-roundtrip.mjs).
+  // DefaultLauncher is an IMPORTED design that still carries PRE-EXISTING strict-
+  // schema nonconformities (a real tokens-lib instance + 2 variable-font axis
+  // nodes) the whole-file validate flags, so the commit gate still holds HERE.
   const cm = callJson(await client.callTool({ name: "commit", arguments: {} }));
   check(cm.error && Array.isArray(cm.errs) && cm.errs.join(" ").includes("invalid file data"),
-    `[MCP] commit is GATED by validate on runtime-hydrated data (FINDING #2: errs=${JSON.stringify(cm.errs)})`);
+    `[MCP] commit gate still holds on the IMPORTED DefaultLauncher (pre-existing tokens-lib + variable-font nonconformities; fresh designs commit clean): errs=${JSON.stringify(cm.errs)}`);
 
   await client.close(); client = null;
 
@@ -128,8 +132,9 @@ try {
     body,
   });
   const updText = await upd.text();
-  check(upd.status === 200 && /258|~:revn/.test(updText),
-    `[TX] update-file transport works (HTTP ${upd.status}, ${updText.slice(0, 40)})`);
+  const updJson = (() => { try { return JSON.parse(updText); } catch { return null; } })();
+  check(upd.status === 200 && updJson && updJson.revn === wc.revn,
+    `[TX] update-file transport works (HTTP ${upd.status}, JSON pre-increment revn=${updJson?.revn} matches real-backend contract)`);
 
   const gf = await getFileViaRuntime(runtime.base, FID);
   check(gf.transit.includes("A1 TX Board"),

@@ -36,6 +36,31 @@
     (-> (ctf/make-file-data (uuid/next) page-id)  ; (file-id page-id) -> data w/ that page
         (with-meta {::page-id page-id}))))
 
+;; Hydrated :data (from get-file transit OR canonical EDN via load-store) is not
+;; schema-clean for sm/check-fn, which validates WITHOUT running the schema's own
+;; :decode/json coercions.  Two gaps, both validation-only (this never touches
+;; session state, the wire transit, or the on-disk EDN):
+;;  (1) shapes arrive as PLAIN MAPS, but schema:shape starts with [:fn shape?] =
+;;      (implements? IShape) — it wants Shape INSTANCES (the schema declares this
+;;      via :decode/json -> decode-shape -> create-shape).  Coerce maps -> records.
+;;  (2) load-store re-emits :tokens-lib / :options even when nil; schema:data marks
+;;      them {:optional true} (absent is OK) but NON-nillable, so present-and-nil
+;;      fails.  Drop them when nil so empty / AI-authored designs validate clean.
+;; NOTE: a non-nil :tokens-lib map (e.g. an imported design's token library) needs
+;; a TokensLib *instance* (valid-tokens-lib? = instance? TokensLib) which has no
+;; cheap reconstructor from the decoded internal form — that case is out of scope
+;; here and stays flagged by validate (see .superpowers/sdd/ai-Afix-findings.md).
+(defn- ->shape-record [o] (if (cts/shape? o) o (cts/create-shape o)))
+(defn- coerce-data-for-validation [data]
+  (let [fix-objects (fn [objs] (when objs (reduce-kv (fn [m k v] (assoc m k (->shape-record v))) {} objs)))]
+    (cond-> data
+      (:pages-index data) (update :pages-index
+                                  (fn [pi] (reduce-kv (fn [m k p] (assoc m k (update p :objects fix-objects))) {} pi)))
+      (:components data)  (update :components
+                                  (fn [cs] (reduce-kv (fn [m k c] (assoc m k (cond-> c (:objects c) (update :objects fix-objects)))) {} cs)))
+      (nil? (:tokens-lib data)) (dissoc :tokens-lib)
+      (nil? (:options data))    (dissoc :options))))
+
 (defn- page-id-of [data] (-> data meta ::page-id))
 
 ;; pencilpot's frontend is always the modern (components/v2 + wasm) build, so the
@@ -352,7 +377,7 @@
        :objects  (fn [] (js/JSON.stringify (->plain-js (get-in (:data @state) [:pages-index (:page-id @state) :objects]))))
        :getShape (fn [id] (js/JSON.stringify (->plain-js (get-in (:data @state) [:pages-index (:page-id @state) :objects (uuid/uuid id)]))))
        :validate (fn []
-                   (let [file {:id file-id :data (:data @state) :features features}]
+                   (let [file {:id file-id :data (coerce-data-for-validation (:data @state)) :features features}]
                      (try (cfv/validate-file-schema! file) (js/JSON.stringify #js [])
                           (catch :default e (js/JSON.stringify #js [(ex-message e)])))))
        ;; Apply a JSON array of change maps (single-page, test-only convenience — NOT

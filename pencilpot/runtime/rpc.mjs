@@ -481,10 +481,22 @@ export async function handleRpc(req, res, cfg) {
   if (command === "update-file") {
     const body = (await readBody(req)).toString("utf8");
     const { revn } = updateFile(cfg.design, body);
-    // Response shape matches pencilpot/spike/recordings/055-update-file.body:
-    // transit+json: ["^ ","~:revn", N, "~:lagged", []]
-    res.writeHead(200, { "content-type": "application/transit+json" });
-    res.end(buildUpdateFileResponse(revn));
+    // The SPA calls update-file as transit (Accept: transit+json) and expects the
+    // transit response (["^ ","~:revn", N, "~:lagged", []], matching
+    // pencilpot/spike/recordings/055-update-file.body).  The headless SDK/MCP
+    // commit() path sends Accept: application/json and expects {"revn": N} (the
+    // real backend's JSON shape) — honour Accept so wc.commit() reads revn correctly.
+    if (wantTransit) {
+      res.writeHead(200, { "content-type": "application/transit+json" });
+      res.end(buildUpdateFileResponse(revn));
+    } else {
+      // Match the REAL backend's JSON contract: it returns the PRE-increment
+      // (original) revn (files_update.clj: "preserve the original revn for the
+      // response"), and the SDK's wc.commit() computes the new revn as res.revn+1.
+      // persistChanges returns the POST-increment revn, so hand back revn-1 here.
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ revn: revn - 1, lagged: [] }));
+    }
     return;
   }
 
