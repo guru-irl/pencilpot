@@ -855,6 +855,57 @@
        :objects  (fn [] (js/JSON.stringify (->plain-js (get-in (:data @state) [:pages-index (:page-id @state) :objects]))))
        :getShape (fn [id] (js/JSON.stringify (->plain-js (get-in (:data @state) [:pages-index (:page-id @state) :objects (uuid/uuid id)]))))
        :renderShape (fn [id] (or (render/shape->svg (objects-of state) (get (objects-of state) (uuid/parse id))) ""))
+       ;; A compact, navigable INDEX of the whole file so an AI agent can locate
+       ;; "where's what" (pages, boards, titles/text, components + their variants)
+       ;; without reading the on-disk EDN. Text is snippet-truncated to stay small.
+       :outline
+       (fn []
+         (let [data        (:data @state)
+               pages-index (:pages-index data)
+               pages-order (or (:pages data) (vec (keys pages-index)))
+               components  (:components data)
+               root        uuid/zero
+               text-of     (fn [s] (let [c (:content s)]
+                                     (when c (let [t (txt/content->text c)]
+                                               (when (seq t) t)))))
+               board?      (fn [s] (and (= (:type s) :frame)
+                                        (= (:frame-id s) root)
+                                        (not= (:id s) root)))
+               page->out   (fn [pid]
+                             (let [page (get pages-index pid)
+                                   objs (:objects page)
+                                   vs   (vals objs)
+                                   boards (->> vs (filter board?)
+                                               (mapv (fn [b] {:id (str (:id b)) :name (:name b)
+                                                              :x (:x b) :y (:y b)
+                                                              :width (:width b) :height (:height b)
+                                                              :children (count (:shapes b))})))
+                                   texts  (->> vs (filter #(= (:type %) :text))
+                                               (keep (fn [t] (when-let [tx (text-of t)]
+                                                               {:id (str (:id t)) :name (:name t)
+                                                                :text (subs tx 0 (min 80 (count tx)))
+                                                                :frameId (str (:frame-id t))})))
+                                               vec)
+                                   instances (->> vs (filter :component-id)
+                                                  (mapv (fn [s] {:id (str (:id s)) :name (:name s)
+                                                                 :componentId (str (:component-id s))
+                                                                 :frameId (str (:frame-id s))
+                                                                 :main (boolean (:main-instance s))})))]
+                               {:id (str pid) :name (:name page)
+                                :counts {:objects (count objs) :boards (count boards)
+                                         :texts (count texts) :instances (count instances)}
+                                :boards boards :texts texts :instances instances}))
+               comp->out   (fn [[cid c]]
+                             {:id (str cid) :name (:name c)
+                              :path (:path c)
+                              :mainPage (some-> (:main-instance-page c) str)
+                              :mainShape (some-> (:main-instance-id c) str)
+                              :variantId (some-> (:variant-id c) str)
+                              :variant (:variant-properties c)})]
+           (js/JSON.stringify
+            (clj->js
+             {:pages (mapv page->out pages-order)
+              :components (mapv comp->out components)}))))
        :validate (fn []
                    (let [file {:id file-id :data (coerce-data-for-validation (:data @state)) :features features}]
                      (try (cfv/validate-file-schema! file) (js/JSON.stringify #js [])

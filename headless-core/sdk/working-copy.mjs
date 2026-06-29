@@ -77,6 +77,11 @@ export class WorkingCopy {
   rotateShape(id, opts) { return this.session.rotateShape(id, JSON.stringify(opts)); }
   renderShape(id) { return this.session.renderShape(id); }
 
+  // Compact, navigable index of the WHOLE file (pages -> boards/text/instances,
+  // plus components + their variants) so you can locate "where's what" without
+  // reading the on-disk EDN. MCP `outline`.
+  outline() { return JSON.parse(this.session.outline()); }
+
   // What the user is currently looking at / has selected in the OPEN editor
   // (reported by the SPA to the runtime). Returns {pageId,pageName,selected:[ids],
   // shapes:[{id,name,type}],ts}. selected is empty when nothing is selected.

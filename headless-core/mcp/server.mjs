@@ -43,6 +43,10 @@ export function createHeadlessMcp({ token, base } = {}) {
       if (fidelity === "high") return text({ shapeId, png: await w.renderShapePngHiFi(shapeId, { scale: scale > 1 ? scale : 2, fontsDir }), fidelity, scale });
       return text({ shapeId, png: w.renderShapePng(shapeId, { scale }), fidelity, scale }); });
 
+  server.registerTool("outline",
+    { description: "A compact, navigable INDEX of the whole design file so you can locate 'where's what' WITHOUT reading any files: every page with its boards (id/name/geometry/child-count), text shapes (id/name/text-snippet/frameId), and component instances; plus the file's components with their path + variant info (variantId/variant props + where the main instance lives). START HERE to orient before editing — e.g. to find a component, its board context, sibling components, or existing variants/versions.", inputSchema: {} },
+    async () => text(need().outline()));
+
   server.registerTool("viewport",
     { description: "What the USER is currently looking at / has selected in the open pencilpot editor: {pageId, pageName, selected:[ids], shapes:[{id,name,type}], ts}. Use this to act on the user's CURRENT selection (e.g. render or edit the selected shape) instead of guessing. `selected` is empty when nothing is selected; ts=0 means the SPA hasn't reported yet (no editor open).", inputSchema: {} },
     async () => text(await need().viewport()));
