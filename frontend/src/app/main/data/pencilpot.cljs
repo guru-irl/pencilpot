@@ -12,10 +12,13 @@
   (:require
    [app.common.transit :as t]
    [app.common.uuid :as uuid]
+   [app.main.data.helpers :as dsh]
    [app.main.data.notifications :as ntf]
    [app.main.data.workspace.notifications :as dwn]
    [app.main.store :as st]
-   [app.util.object :as obj]))
+   [app.util.object :as obj]
+   [beicon.v2.core :as rx]
+   [beicon.v2.operators :as rxo]))
 
 (defn enabled?
   "True when the runtime exposed globalThis.pencilpotFile (filesystem mode)."
@@ -127,6 +130,35 @@
 
 (defonce ^:private started? (atom false))
 
+(defn- report-viewport!
+  "POST the current page + selection to the runtime so an AI agent (MCP/SDK
+   `viewport()`) can see what the user is looking at / has selected. Reads the
+   live state via deref (reliable) rather than okulary refs."
+  []
+  (try
+    (let [state    @st/state
+          page-id  (:current-page-id state)
+          page     (dsh/lookup-page state)
+          objects  (dsh/lookup-page-objects state)
+          selected (get-in state [:workspace-local :selected])
+          shapes   (->> selected
+                        (keep (fn [id]
+                                (when-let [o (get objects id)]
+                                  {:id   (str id)
+                                   :name (:name o)
+                                   :type (some-> (:type o) name)})))
+                        vec)
+          payload  {:pageId   (some-> page-id str)
+                    :pageName (:name page)
+                    :selected (mapv str selected)
+                    :shapes   shapes}]
+      (js/fetch "/pencilpot/viewport"
+                #js {:method "POST"
+                     :headers #js {"Content-Type" "application/json"}
+                     :body (js/JSON.stringify (clj->js payload))})
+      nil)
+    (catch :default _ nil)))
+
 (defn start-client!
   "Idempotent: when enabled?, open the SSE channel to /pencilpot/live and bind
    Ctrl/Cmd+S and beforeunload. Safe to call multiple times."
@@ -151,4 +183,14 @@
      (fn [e]
        (when (:dirty @status)
          (set! (.-returnValue e) "")
-         "")))))
+         "")))
+    ;; Report the open page + selection to the runtime so an AI agent can see
+    ;; what the user is viewing / has selected. We watch the potok event stream
+    ;; (the same source store.cljs uses) and POST whenever the [page, selection]
+    ;; signature changes — deref-based, so it's immune to okulary lens laziness.
+    (->> st/stream
+         (rx/map (fn [_]
+                   (let [s @st/state]
+                     [(:current-page-id s) (get-in s [:workspace-local :selected])])))
+         (rx/pipe (rxo/distinct-contiguous))
+         (rx/subs! (fn [_] (report-viewport!))))))

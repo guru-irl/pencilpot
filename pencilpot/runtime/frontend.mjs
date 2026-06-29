@@ -11,12 +11,14 @@ export function distDir() {
 // Penpot). The save chrome, dirty indicator, Ctrl/Cmd+S handling and the
 // external-changes banner are now native CLJS (app.main.data.pencilpot + the
 // native header/File menu), so config.js only seeds the bootstrap globals.
-export function configJs({ publicUri = "", fileId = null, teamId = null } = {}) {
+export function configJs({ publicUri = "", fileId = null, teamId = null, ai = false } = {}) {
   return `globalThis.penpotPublicURI=${publicUri ? JSON.stringify(publicUri) : "location.origin"};`
     // `disable-render-wasm-info` strips the upstream dev default that paints a
     // "WebGL rendering" debug label on the wasm canvas every frame. penpotFlags=""
     // would otherwise inherit common/flags `default` (a dev flag set), leaving the
     // debug overlay visible in a shipped pencilpot session.
     + `globalThis.penpotFlags="disable-render-wasm-info";`
-    + `globalThis.pencilpotFile=${JSON.stringify({ fileId, teamId })};`;
+    + `globalThis.pencilpotFile=${JSON.stringify({ fileId, teamId })};`
+    // AI mode (pencilpot open --ai): the SPA auto-opens the integrated terminal.
+    + `globalThis.pencilpotAi=${ai ? "true" : "false"};`;
 }

@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { createSession } from "../target/headless/penpot.js";
-import { getFile, updateFile } from "./rpc.mjs";
+import { getFile, updateFile, BASE } from "./rpc.mjs";
 
 // Stable key for a validation-error entry so the baseline diff compares by VALUE,
 // not identity — robust whether the validator yields strings (the engine's generic
@@ -76,6 +76,15 @@ export class WorkingCopy {
   resizeShape(id, opts) { return this.session.resizeShape(id, JSON.stringify(opts)); }
   rotateShape(id, opts) { return this.session.rotateShape(id, JSON.stringify(opts)); }
   renderShape(id) { return this.session.renderShape(id); }
+
+  // What the user is currently looking at / has selected in the OPEN editor
+  // (reported by the SPA to the runtime). Returns {pageId,pageName,selected:[ids],
+  // shapes:[{id,name,type}],ts}. selected is empty when nothing is selected.
+  async viewport() {
+    const res = await fetch(`${BASE}/pencilpot/viewport`, { headers: { Accept: "application/json" } });
+    if (!res.ok) throw new Error(`viewport -> HTTP ${res.status}`);
+    return res.json();
+  }
   // Rasterize a shape's SVG to PNG natively (no browser) via the system rsvg-convert
   // (librsvg) or ImageMagick — both standard. scale multiplies pixel size (default 1).
   // Returns the written PNG path. Throws if the shape has no renderable SVG.

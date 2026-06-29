@@ -104,7 +104,12 @@
     ptk/UpdateEvent
     (update [_ state]
       (-> state
-          (update :workspace-layout #(or % layout/default-layout))
+          ;; pencilpot --ai mode (globalThis.pencilpotAi): auto-open the integrated
+          ;; terminal dock so the AI agent's shell is visible on launch.
+          (update :workspace-layout #(let [base (or % layout/default-layout)]
+                                       (if (.-pencilpotAi js/globalThis)
+                                         (conj base :terminal)
+                                         base)))
           (update :workspace-global #(or % layout/default-global))))
 
     ptk/WatchEvent

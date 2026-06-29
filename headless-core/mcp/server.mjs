@@ -43,6 +43,10 @@ export function createHeadlessMcp({ token, base } = {}) {
       if (fidelity === "high") return text({ shapeId, png: await w.renderShapePngHiFi(shapeId, { scale: scale > 1 ? scale : 2, fontsDir }), fidelity, scale });
       return text({ shapeId, png: w.renderShapePng(shapeId, { scale }), fidelity, scale }); });
 
+  server.registerTool("viewport",
+    { description: "What the USER is currently looking at / has selected in the open pencilpot editor: {pageId, pageName, selected:[ids], shapes:[{id,name,type}], ts}. Use this to act on the user's CURRENT selection (e.g. render or edit the selected shape) instead of guessing. `selected` is empty when nothing is selected; ts=0 means the SPA hasn't reported yet (no editor open).", inputSchema: {} },
+    async () => text(await need().viewport()));
+
   server.registerTool("diff_baseline",
     { description: "Capture the current object map as a diff baseline (in memory). Call this BEFORE the user edits in the open SPA, then call `diff` afterwards to see exactly what they changed.", inputSchema: {} },
     async () => { diffBaseline = JSON.parse(need().session.objects());

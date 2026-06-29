@@ -25,7 +25,7 @@ export function serveStatic(req, res, cfg = {}) {
 
   // config.js is injected, not read from disk (match the path index.html requests)
   if (urlPath === "/js/config.js" || urlPath === "/config.js") {
-    const body = configJs({ fileId: cfg.fileId, teamId: cfg.teamId });
+    const body = configJs({ fileId: cfg.fileId, teamId: cfg.teamId, ai: cfg.ai });
     res.writeHead(200, { "content-type": "application/javascript", "cache-control": "no-store" });
     return res.end(body);
   }

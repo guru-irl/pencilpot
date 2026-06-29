@@ -24,6 +24,10 @@ function parseArgs(argv) {
   const flags = {};
   const positional = [];
 
+  // Boolean flags never consume the following token (so `open --ai foo.pencil`
+  // keeps foo.pencil as a positional instead of treating it as --ai's value).
+  const BOOLEAN_FLAGS = new Set(["ai", "no-window", "json", "save-baseline", "no-default", "help"]);
+
   // Normalise --help / -h as a pseudo-command so the switch below can handle it.
   if (cmd === "--help" || cmd === "-h") {
     cmd = "--help";
@@ -37,7 +41,7 @@ function parseArgs(argv) {
     } else if (a.startsWith("--")) {
       const key = a.slice(2);
       const next = args[i + 1];
-      if (next !== undefined && !next.startsWith("--")) {
+      if (!BOOLEAN_FLAGS.has(key) && next !== undefined && !next.startsWith("--")) {
         // Accumulate multi-value flags (e.g. --family / --map can repeat)
         if (key === "family" || key === "map") {
           if (!Array.isArray(flags[key])) flags[key] = [];

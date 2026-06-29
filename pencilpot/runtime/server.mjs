@@ -8,7 +8,7 @@ import { resolveMediaAsset } from "./media.mjs";
 import { resolveProject } from "../store/project.mjs";
 import { readFonts } from "../store/fonts.mjs";
 import { handleGfontsCSS, handleGfontsFont } from "./gfonts.mjs";
-import { startLiveWatcher, handleLiveSse, noteSelfWrite, broadcastStatus } from "./live.mjs";
+import { startLiveWatcher, handleLiveSse, noteSelfWrite, broadcastStatus, setViewport, getViewport } from "./live.mjs";
 import { initWorktree, save as saveWorktree, discard as discardWorktree, status as worktreeStatus } from "./worktree.mjs";
 import { attachTerminal } from "./terminal.mjs";
 
@@ -199,8 +199,28 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // Viewport reporting: the SPA POSTs its current page + selection here; an AI
+    // agent reads it back via GET (MCP/SDK viewport()) to see what the user is
+    // looking at / has selected.
+    if (req.url === "/pencilpot/viewport") {
+      if (req.method === "GET") {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify(getViewport()));
+        return;
+      }
+      if (req.method === "POST") {
+        let raw = "";
+        req.on("data", (c) => { raw += c; if (raw.length > 1e6) req.destroy(); });
+        req.on("end", () => {
+          try { setViewport(JSON.parse(raw || "{}")); } catch { /* ignore malformed */ }
+          res.writeHead(204); res.end();
+        });
+        return;
+      }
+    }
+
     if (req.url.startsWith("/api/")) return await handleRpc(req, res, CONFIG);
-    return serveStatic(req, res, { fileId, teamId: TEAM_ID });
+    return serveStatic(req, res, { fileId, teamId: TEAM_ID, ai: CONFIG.ai });
   } catch (err) {
     console.error("server error", req.method, req.url, err);
     res.writeHead(500); res.end(String(err));

@@ -257,3 +257,22 @@ export function handleLiveSse(req, res, watcher) {
   res.on("close",  cleanup);
   res.on("error",  cleanup);
 }
+
+// ── Viewport reporting ───────────────────────────────────────────────────────
+// The open SPA POSTs its current page + selection here whenever they change so
+// an AI agent (via the MCP/SDK `viewport()`) can see WHAT THE USER IS LOOKING AT
+// / has selected, and act on those exact shape ids. Latest-wins, in memory only.
+let _viewport = { pageId: null, pageName: null, selected: [], shapes: [], ts: 0 };
+
+export function setViewport(v) {
+  _viewport = {
+    pageId: v?.pageId ?? null,
+    pageName: v?.pageName ?? null,
+    selected: Array.isArray(v?.selected) ? v.selected : [],
+    shapes: Array.isArray(v?.shapes) ? v.shapes : [],
+    ts: Date.now(),
+  };
+  return _viewport;
+}
+
+export function getViewport() { return _viewport; }

@@ -74,8 +74,8 @@ export function waitForHttp(url, timeoutMs = 45000) {
 }
 
 /** Spawn runtime/server.mjs over a design dir (legacy PENCILPOT_DESIGN mode). */
-export async function spawnRuntime(dir, port = randomPort()) {
-  const env = { ...process.env, PENCILPOT_DESIGN: dir, PENCILPOT_PORT: String(port) };
+export async function spawnRuntime(dir, port = randomPort(), extraEnv = {}) {
+  const env = { ...process.env, PENCILPOT_DESIGN: dir, PENCILPOT_PORT: String(port), ...extraEnv };
   const proc = spawn(process.execPath, [RUNTIME], { env, stdio: ["ignore", "inherit", "inherit"] });
   const base = `http://localhost:${port}`;
   await waitForHttp(base + "/");
