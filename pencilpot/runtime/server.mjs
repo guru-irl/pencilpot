@@ -56,6 +56,11 @@ initWorktree(designDir);
 export const CONFIG = {
   project: projectRoot ?? process.env.PENCILPOT_PROJECT ?? null,
   design: designDir,
+  // AI mode: when the design is opened with `--ai`, the integrated terminal
+  // auto-launches `pi` with the pencilpot skill preloaded and targeted at this
+  // runtime (see terminal.mjs resolveBootstrap). Plain shell otherwise.
+  ai: process.env.PENCILPOT_AI === "1",
+  base: `http://localhost:${PORT}`,
 };
 
 // Start the live-update watcher for the open design directory.

@@ -156,6 +156,7 @@ async function cmdOpen(positional, flags) {
         ...process.env,
         PENCILPOT_PROJECT: pencilPath,
         PENCILPOT_PORT: String(port),
+        ...(flags["ai"] ? { PENCILPOT_AI: "1" } : {}),
         ...(flags["design"] ? { PENCILPOT_DESIGN: flags["design"] } : {}),
       },
       stdio: "inherit",
@@ -573,6 +574,7 @@ Commands:
   new <name|dir> [--design <d>]          Scaffold a new .pencil project (starter design included)
   open <path.pencil|dir> [--no-window]   Start the runtime and open the editor
        [--port N] [--design <name>]      Open a specific design by name
+       [--ai]                            Auto-launch pi (pencilpot skill preloaded) in the terminal
   import <file.penpot> [targetDir]       Import a .penpot file as a design (native, no backend)
          [--project <dir>]               Project directory (default: cwd; bootstrapped if absent)
          [--name <design>]               Design name (default: file basename)
