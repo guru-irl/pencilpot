@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { WorkingCopy } from "../sdk/index.mjs";
+import { diffObjects, formatDiff } from "../../pencilpot/store/diff.mjs";
 import { runScript } from "../sdk/script.mjs";
 
 const text = (v) => ({ content: [{ type: "text", text: typeof v === "string" ? v : JSON.stringify(v, null, 2) }] });
@@ -15,6 +16,7 @@ export function createHeadlessMcp({ token, base } = {}) {
   );
   let wc = null;
   const need = () => { if (!wc) throw new Error("No file checked out. Call checkout(fileId) first."); return wc; };
+  let diffBaseline = null;
 
   server.registerTool("checkout",
     { description: "Load a Penpot file into a headless working copy by id.", inputSchema: { fileId: z.string().describe("Penpot file UUID") } },
@@ -33,11 +35,25 @@ export function createHeadlessMcp({ token, base } = {}) {
     async () => text(JSON.parse(need().session.objects())));
 
   server.registerTool("render_shape",
-    { description: "Render ONE shape/board/component to an image, browser-free + fast (Penpot's SVG renderer via react-dom server, no Playwright). format 'svg' returns the SVG string; 'png' rasterizes via rsvg-convert and returns the file path (scale multiplies pixels). Use it to SEE what a shape looks like.",
-      inputSchema: { shapeId: z.string(), format: z.enum(["svg", "png"]).optional(), scale: z.number().optional() } },
-    async ({ shapeId, format = "png", scale = 1 }) => { const w = need();
+    { description: "Render ONE shape/board/component to an image. format 'svg' returns the SVG string (browser-free, Penpot's renderer via react-dom server; now carries text as foreignObject). format 'png' rasterizes: fidelity 'fast' (default) uses rsvg-convert (browser-free, but text-LESS — librsvg ignores foreignObject); fidelity 'high' uses the bundled Chromium so TEXT renders (pass fontsDir = the project's fonts/ store to embed custom families). scale multiplies pixels. Use it to SEE what a shape looks like.",
+      inputSchema: { shapeId: z.string(), format: z.enum(["svg", "png"]).optional(), scale: z.number().optional(),
+                     fidelity: z.enum(["fast", "high"]).optional(), fontsDir: z.string().optional() } },
+    async ({ shapeId, format = "png", scale = 1, fidelity = "fast", fontsDir }) => { const w = need();
       if (format === "svg") return text({ shapeId, svg: w.session.renderShape(shapeId) });
-      return text({ shapeId, png: w.renderShapePng(shapeId, { scale }), scale }); });
+      if (fidelity === "high") return text({ shapeId, png: await w.renderShapePngHiFi(shapeId, { scale: scale > 1 ? scale : 2, fontsDir }), fidelity, scale });
+      return text({ shapeId, png: w.renderShapePng(shapeId, { scale }), fidelity, scale }); });
+
+  server.registerTool("diff_baseline",
+    { description: "Capture the current object map as a diff baseline (in memory). Call this BEFORE the user edits in the open SPA, then call `diff` afterwards to see exactly what they changed.", inputSchema: {} },
+    async () => { diffBaseline = JSON.parse(need().session.objects());
+      return text({ baseline: true, objects: Object.keys(diffBaseline).length }); });
+
+  server.registerTool("diff",
+    { description: "What changed since the last `diff_baseline` (the user's edits, typically): added / removed / modified shapes with the changed semantic keys. Returns a structured diff plus a human-readable summary. Errors if no baseline was captured yet.", inputSchema: {} },
+    async () => { const cur = JSON.parse(need().session.objects());
+      if (!diffBaseline) return text({ error: "no baseline — call diff_baseline first" });
+      const d = diffObjects(diffBaseline, cur);
+      return text({ ...d, text: formatDiff(d) }); });
 
   server.registerTool("map_fonts_variable",
     { description: "Map text families onto a variable font WITH per-family axis settings (wdth/opsz/GRAD/ROND/slnt) and strip stale position-data so the new widths re-layout. mapping: {\"Family Name\": {fontId, family, axes:{wdth:62.5, opsz:120}}}. Whole-file :data transform — does NOT round-trip through commit(); persist with the `pencilpot map-variable` CLI for local designs.",

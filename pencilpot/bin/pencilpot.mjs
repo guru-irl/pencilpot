@@ -585,6 +585,9 @@ Commands:
   add-google <Family> [--project <dir>]  Fetch + register a Google font
            [--variable] [--weights 100..900] [--axes wght,wdth]
   fonts <path.pencil|dir>               List added fonts + report missing families
+  diff <path.pencil|dir>                Show what changed since a saved baseline
+       [--save-baseline] [--json]       (--save-baseline captures the current state)
+       [--design <name>]
   retarget-fonts <project> [--family "Name=fontId" …]
                                          Rewrite every font-id ref in the design to a
                                          canonical id per family (consolidates duplicates)
@@ -1151,6 +1154,65 @@ if (!cmd || cmd === "--help" || flags["help"]) {
   process.exit(0);
 }
 
+// ---------------------------------------------------------------------------
+// diff command — what changed in the design since a saved baseline (the user's
+// edits, typically, made in the open SPA while the AI worked).
+// ---------------------------------------------------------------------------
+async function cmdDiff(positional, flags) {
+  const arg = positional[0] || ".";
+  const { resolveProject } = await import("../store/project.mjs");
+  const { writeBaseline, readBaseline } = await import("../store/snapshot.mjs");
+  const { diffObjects, formatDiff } = await import("../store/diff.mjs");
+
+  let proj;
+  try { proj = resolveProject(path.resolve(arg)); }
+  catch (e) { console.error(`Error resolving project: ${e.message}`); process.exit(1); }
+
+  const pencilPath = path.join(proj.root, `${proj.name}.pencil`);
+  const designName = flags["design"] || proj.default;
+  const entry = proj.designs.find((d) => d.name === designName) || proj.designs[0];
+  let fileId = null;
+  try {
+    const m = fs.readFileSync(path.join(entry.dir, "manifest.edn"), "utf8").match(/:id\s+#uuid\s+"([^"]+)"/);
+    if (m) fileId = m[1];
+  } catch {}
+  if (!fileId) { console.error("diff: could not resolve the design file id"); process.exit(1); }
+
+  const port = await findFreePort();
+  const child = spawn(process.execPath, [SERVER_MJS], {
+    env: { ...process.env, PENCILPOT_PROJECT: pencilPath, PENCILPOT_PORT: String(port),
+           ...(flags["design"] ? { PENCILPOT_DESIGN: flags["design"] } : {}) },
+    stdio: ["ignore", "ignore", "inherit"],
+  });
+  const done = () => { try { child.kill("SIGTERM"); } catch {} };
+  try {
+    if (!(await waitForHttp(`http://localhost:${port}/`, 30_000))) {
+      console.error("diff: runtime did not start"); done(); process.exit(1);
+    }
+    process.env.PENPOT_HL_BASE = `http://localhost:${port}`;
+    const { WorkingCopy } = await import("../../headless-core/sdk/working-copy.mjs");
+    const wc = await new WorkingCopy(fileId, "local").checkout();
+    const objects = JSON.parse(wc.session.objects());
+
+    if (flags["save-baseline"] || flags["baseline"]) {
+      const p = writeBaseline(proj.root, objects, { fileId });
+      console.log(`Baseline saved (${Object.keys(objects).length} objects) → ${p}`);
+      done(); process.exit(0);
+    }
+    const snap = readBaseline(proj.root);
+    if (!snap) {
+      console.error("diff: no baseline yet — run `pencilpot diff <project> --save-baseline` first.");
+      done(); process.exit(2);
+    }
+    const d = diffObjects(snap.objects, objects);
+    if (flags["json"]) console.log(JSON.stringify(d, null, 2));
+    else console.log(formatDiff(d));
+    done(); process.exit(0);
+  } catch (e) {
+    console.error(`diff: ${e.message}`); done(); process.exit(1);
+  }
+}
+
 switch (cmd) {
   case "new":
     await cmdNew(positional, flags);
@@ -1184,6 +1246,9 @@ switch (cmd) {
     break;
   case "fonts":
     await cmdFonts(positional, flags);
+    break;
+  case "diff":
+    await cmdDiff(positional, flags);
     break;
   case "install-desktop":
     cmdInstallDesktop();
