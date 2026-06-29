@@ -93,6 +93,18 @@ export class WorkingCopy {
     } finally { try { fs.unlinkSync(svgPath); } catch {} }
   }
 
+  // High-fidelity rasterize INCLUDING text. `renderShape` emits text as
+  // foreignObject HTML (no browser-computed position-data under headless SSR),
+  // which librsvg ignores — so for pixel-accurate text we rasterize through the
+  // Chromium that Playwright ships. Pass `fontsDir` (a pencilpot fonts/ store) to
+  // embed the design's custom families as @font-face. Async; returns the PNG path.
+  async renderShapePngHiFi(id, { scale = 2, out, fontsDir } = {}) {
+    const svg = this.session.renderShape(id);
+    if (!svg || !svg.startsWith("<svg")) throw new Error(`renderShapePngHiFi: no SVG for shape ${id}`);
+    const { rasterizeSvg } = await import("./hifi-raster.mjs");
+    return rasterizeSvg({ svg, out, scale, fontsDir, id });
+  }
+
   // Map families onto a variable font WITH per-family axis settings (wdth/opsz/…).
   // mapping: { "Family Name": { fontId, family, axes: { wdth: 62.5, opsz: 120 } } }.
   // NOTE: this is a whole-file :data transform (not a recorded change), so it does

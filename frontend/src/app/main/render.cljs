@@ -254,17 +254,26 @@
   {::mf/wrap-props false}
   [{:keys [objects frame vbox x y width height background]}]
   (let [shape-wrapper (shape-wrapper-factory objects)]
+    ;; `is-render?` makes text shapes that lack browser-computed `:position-data`
+    ;; (always the case under headless SSR — there is no DOM to measure glyph
+    ;; positions) fall back to the `foreignObject` HTML text renderer instead of
+    ;; rendering nothing. The resulting SVG then carries the real text markup with
+    ;; inline font styles, so it is faithful in any foreignObject-aware viewer and
+    ;; can be rasterized to pixels by a browser engine (see SDK renderShapePng
+    ;; fidelity:"high"). librsvg ignores foreignObject, so the rsvg path stays
+    ;; text-less by design.
     [:& (mf/provider muc/render-thumbnails) {:value false}
-     [:svg {:view-box vbox
-            :width (ust/format-precision width viewbox-decimal-precision)
-            :height (ust/format-precision height viewbox-decimal-precision)
-            :version "1.1"
-            :xmlns "http://www.w3.org/2000/svg"
-            :xmlnsXlink "http://www.w3.org/1999/xlink"
-            :fill "none"}
-      (when (some? background)
-        [:rect {:x x :y y :width width :height height :fill background}])
-      [:& shape-wrapper {:shape frame}]]]))
+     [:& (mf/provider muc/is-render?) {:value true}
+      [:svg {:view-box vbox
+             :width (ust/format-precision width viewbox-decimal-precision)
+             :height (ust/format-precision height viewbox-decimal-precision)
+             :version "1.1"
+             :xmlns "http://www.w3.org/2000/svg"
+             :xmlnsXlink "http://www.w3.org/1999/xlink"
+             :fill "none"}
+       (when (some? background)
+         [:rect {:x x :y y :width width :height height :fill background}])
+       [:& shape-wrapper {:shape frame}]]]]))
 
 ;; Component that serves for render frame thumbnails, mainly used in
 ;; the viewer and inspector
