@@ -9,7 +9,7 @@ import { readFonts } from "../store/fonts.mjs";
 import { resolveProjectRoot, resolveProject } from "../store/project.mjs";
 import { readBody } from "./proxy.mjs";
 import { stub, isStub, buildUpdateFileResponse } from "./stubs.mjs";
-import { broadcastStatus } from "./live.mjs";
+import { broadcastStatus, broadcastChanges } from "./live.mjs";
 import { parseMultipart } from "./multipart.mjs";
 import { imageSize } from "./image-size.mjs";
 import { resolveMediaAsset } from "./media.mjs";
@@ -496,6 +496,11 @@ export async function handleRpc(req, res, cfg) {
       // persistChanges returns the POST-increment revn, so hand back revn-1 here.
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({ revn: revn - 1, lagged: [] }));
+      // Realtime: this is the AI/MCP/SDK write path (JSON accept). Push the edit
+      // to every connected SSE client so the open SPA applies it live. The SPA's
+      // OWN edits arrive on the transit branch above and are NOT broadcast (they
+      // are already applied locally — broadcasting would echo-loop them back).
+      broadcastChanges(body, revn);
     }
     return;
   }

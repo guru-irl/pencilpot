@@ -191,6 +191,23 @@ export function broadcastStatus(dirty, revn) {
   }
 }
 
+/**
+ * Broadcast an AI-originated edit to every connected SSE client as a `changes`
+ * event. `transitBody` is the verbatim update-file transit body (single-line
+ * JSON, safe in an SSE `data:` field); the SPA decodes it with its own transit
+ * reader and feeds the changes into the canonical `handle-file-change` apply
+ * path so the open workspace updates live.  Only the AI/MCP/SDK write path calls
+ * this (the JSON-accept branch of update-file); the SPA's own edits are already
+ * applied locally and must NOT be echoed back.
+ */
+export function broadcastChanges(transitBody, revn) {
+  const payload = `event: changes\ndata: ${JSON.stringify({ revn: revn ?? 0, body: String(transitBody) })}\n\n`;
+  const { clients } = getLiveWatcher();
+  for (const client of clients) {
+    try { client.write(payload); } catch { clients.delete(client); }
+  }
+}
+
 // ── HTTP handler for GET /pencilpot/live (SSE) ───────────────────────────────
 
 /**
