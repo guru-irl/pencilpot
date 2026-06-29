@@ -1,4 +1,5 @@
-{:deps {penpot/common {:local/root "../common"}}
+{:deps {penpot/common {:local/root "../common"}
+        penpot/frontend {:local/root "../frontend"}}
  :aliases
  {:dev
   {:extra-deps {thheller/shadow-cljs {:mvn/version "3.2.2"}}

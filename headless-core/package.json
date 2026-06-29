@@ -3,7 +3,9 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "bin": { "pp": "bin/pp.mjs" },
+  "bin": {
+    "pp": "bin/pp.mjs"
+  },
   "scripts": {
     "build": "clojure -M:dev:shadow-cljs release headless",
     "watch": "clojure -M:dev:shadow-cljs watch headless",
@@ -20,6 +22,9 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.24.0",
     "date-fns": "^4.1.0",
+    "lodash": "^4.18.1",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
     "zod": "^4.3.6"
   }
 }

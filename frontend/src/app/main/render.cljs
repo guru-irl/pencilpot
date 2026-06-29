@@ -734,6 +734,21 @@
                                          :deleted? deleted?})]
                (rds/renderToStaticMarkup elem))))))))
 
+(defn shape->svg
+  "Synchronous, browser-free SVG string of a single shape/component (frame, group
+  or board) via frame-imposter. Returns nil for a nil shape."
+  [objects shape]
+  (when (some? shape)
+    (let [bounds (gsb/get-object-bounds objects shape {:ignore-margin? false})
+          x      (dm/get-prop bounds :x)
+          y      (dm/get-prop bounds :y)
+          width  (dm/get-prop bounds :width)
+          height (dm/get-prop bounds :height)
+          vbox   (str/ffmt "% % % %" x y width height)]
+      (rds/renderToStaticMarkup
+       (mf/element frame-imposter #js {:objects objects :frame shape :vbox vbox
+                                       :x x :y y :width width :height height})))))
+
 (defn render-frame
   ([objects shape object-id]
    (render-frame objects shape object-id nil))

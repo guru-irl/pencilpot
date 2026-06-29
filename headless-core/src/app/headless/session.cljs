@@ -28,6 +28,7 @@
    [app.common.geom.matrix]                       ; side-effect: transit handler
    [app.common.geom.point]                        ; side-effect: transit handler
    [app.pencilpot.store :as store]               ; canonical-EDN store serializer
+   [app.main.render :as render]                  ; shape->svg (browser-free SSR)
    [clojure.string :as str]
    [clojure.walk :as walk]))
 
@@ -853,6 +854,7 @@
            js/undefined))
        :objects  (fn [] (js/JSON.stringify (->plain-js (get-in (:data @state) [:pages-index (:page-id @state) :objects]))))
        :getShape (fn [id] (js/JSON.stringify (->plain-js (get-in (:data @state) [:pages-index (:page-id @state) :objects (uuid/uuid id)]))))
+       :renderShape (fn [id] (or (render/shape->svg (objects-of state) (get (objects-of state) (uuid/parse id))) ""))
        :validate (fn []
                    (let [file {:id file-id :data (coerce-data-for-validation (:data @state)) :features features}]
                      (try (cfv/validate-file-schema! file) (js/JSON.stringify #js [])

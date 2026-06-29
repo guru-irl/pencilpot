@@ -7,13 +7,16 @@
    :devtools {:autoload false}
    :modules
    {:penpot
-    {:exports {buildAddBoardChange app.headless.core/build-add-board-change
+    {:prepend "import {createRequire as __cr} from 'module'; globalThis.require=globalThis.require||__cr(import.meta.url);"
+     :exports {buildAddBoardChange app.headless.core/build-add-board-change
                buildAddBoardBody   app.headless.core/build-add-board-body
                buildSetPositionDataBody app.headless.core/build-set-position-data-body
                createSession       app.headless.session/create-session
                importBinfileV3     app.pencilpot.import/import-binfile-v3}}}
    :js-options {:entry-keys ["module" "browser" "main"]
-                :export-conditions ["module" "import" "browser" "require" "default"]}
+                :js-package-dirs ["node_modules" "../frontend/node_modules"]
+                :keep-as-require #{"process" "util" "stream" "buffer" "crypto" "async_hooks" "events" "string_decoder"}
+                :export-conditions ["node" "module" "import" "require" "default"]}
    :compiler-options {:output-feature-set :es2020
                       :output-wrapper false
                       :warnings {:fn-deprecated false}}}}}
