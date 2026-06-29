@@ -4,6 +4,10 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { createSession } from "../target/headless/penpot.js";
 
 function boardWithRect() {
@@ -37,4 +41,17 @@ test("renderShape works on a fromStore-hydrated session", () => {
   const svg = s2.renderShape(b);
   assert.ok(svg.startsWith("<svg"), "hydrated session renders SVG");
   assert.match(svg, /viewBox="0 0 200 120"/, "hydrated viewBox matches");
+});
+
+test("renderShape SVG rasterizes to a real PNG via rsvg-convert (no browser)", () => {
+  const has = spawnSync("rsvg-convert", ["--version"]).status === 0;
+  if (!has) return; // host lacks rsvg-convert: skip (SVG path already covered)
+  const { s, b } = boardWithRect();
+  const svgP = path.join(os.tmpdir(), `rt-${Date.now()}.svg`);
+  const pngP = svgP.replace(".svg", ".png");
+  fs.writeFileSync(svgP, s.renderShape(b));
+  assert.equal(spawnSync("rsvg-convert", ["-z", "2", "-f", "png", svgP, "-o", pngP]).status, 0);
+  const buf = fs.readFileSync(pngP);
+  assert.ok(buf.length > 100 && buf[0] === 0x89 && buf[1] === 0x50, "PNG magic bytes present"); // 400x240 @2x
+  fs.unlinkSync(svgP); fs.unlinkSync(pngP);
 });

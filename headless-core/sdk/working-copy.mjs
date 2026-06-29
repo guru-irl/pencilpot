@@ -1,4 +1,8 @@
 import { randomUUID } from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { createSession } from "../target/headless/penpot.js";
 import { getFile, updateFile } from "./rpc.mjs";
 
@@ -72,6 +76,22 @@ export class WorkingCopy {
   resizeShape(id, opts) { return this.session.resizeShape(id, JSON.stringify(opts)); }
   rotateShape(id, opts) { return this.session.rotateShape(id, JSON.stringify(opts)); }
   renderShape(id) { return this.session.renderShape(id); }
+  // Rasterize a shape's SVG to PNG natively (no browser) via the system rsvg-convert
+  // (librsvg) or ImageMagick — both standard. scale multiplies pixel size (default 1).
+  // Returns the written PNG path. Throws if the shape has no renderable SVG.
+  renderShapePng(id, { scale = 1, out } = {}) {
+    const svg = this.session.renderShape(id);
+    if (!svg || !svg.startsWith("<svg")) throw new Error(`renderShapePng: no SVG for shape ${id}`);
+    const png = out || path.join(os.tmpdir(), `pencilpot-${id}-${Date.now()}.png`);
+    const svgPath = png.replace(/\.png$/, "") + ".svg";
+    fs.writeFileSync(svgPath, svg);
+    try {
+      if (spawnSync("rsvg-convert", ["-z", String(scale), "-f", "png", svgPath, "-o", png]).status !== 0)
+        spawnSync("magick", [svgPath, "-resize", `${scale * 100}%`, png]);
+      if (!fs.existsSync(png)) throw new Error("rasterizer produced no output (need rsvg-convert or magick)");
+      return png;
+    } finally { try { fs.unlinkSync(svgPath); } catch {} }
+  }
 
   // Map families onto a variable font WITH per-family axis settings (wdth/opsz/…).
   // mapping: { "Family Name": { fontId, family, axes: { wdth: 62.5, opsz: 120 } } }.
