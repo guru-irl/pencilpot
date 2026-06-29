@@ -32,6 +32,13 @@ export function createHeadlessMcp({ token, base } = {}) {
     { description: "Return the working copy's object map (id -> shape).", inputSchema: {} },
     async () => text(JSON.parse(need().session.objects())));
 
+  server.registerTool("render_shape",
+    { description: "Render ONE shape/board/component to an image, browser-free + fast (Penpot's SVG renderer via react-dom server, no Playwright). format 'svg' returns the SVG string; 'png' rasterizes via rsvg-convert and returns the file path (scale multiplies pixels). Use it to SEE what a shape looks like.",
+      inputSchema: { shapeId: z.string(), format: z.enum(["svg", "png"]).optional(), scale: z.number().optional() } },
+    async ({ shapeId, format = "png", scale = 1 }) => { const w = need();
+      if (format === "svg") return text({ shapeId, svg: w.session.renderShape(shapeId) });
+      return text({ shapeId, png: w.renderShapePng(shapeId, { scale }), scale }); });
+
   server.registerTool("map_fonts_variable",
     { description: "Map text families onto a variable font WITH per-family axis settings (wdth/opsz/GRAD/ROND/slnt) and strip stale position-data so the new widths re-layout. mapping: {\"Family Name\": {fontId, family, axes:{wdth:62.5, opsz:120}}}. Whole-file :data transform — does NOT round-trip through commit(); persist with the `pencilpot map-variable` CLI for local designs.",
       inputSchema: { mapping: z.record(z.object({ fontId: z.string(), family: z.string().optional(), axes: z.record(z.number()).optional() })) } },

@@ -58,6 +58,7 @@ POST http://localhost:<port>/pencilpot/discard              # drop staged edits 
 | `wc.addInteraction({shapeId,destination,eventType?,actionType?,preserveScroll?})` | wires a prototype link (default click→navigate) |
 | `wc.addColorToken({set,name,value})` — alias of `wc.addToken({...,type:"color"})` |
 | `wc.serializeStore()` / `wc.validate()` / `wc.pendingChanges()` / `wc.tokens()` | introspection (the MCP `scene()` tool returns the id→shape map) |
+| `wc.renderShape(id)` → SVG / `wc.renderShapePng(id,{scale?,out?})` → png path | NATIVE browser-free render of one shape/board/component (Penpot's SVG renderer via react-dom server; PNG via system `rsvg-convert`). Sub-ms. MCP `render_shape`. |
 
 **Order matters:** add children → THEN set layout (setters reflow existing children). `closeBoard()` is
 stack-based: close a board before starting an unrelated sibling.

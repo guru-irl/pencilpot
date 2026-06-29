@@ -42,6 +42,7 @@ An AI dev loop MUST save explicitly, or the edit is lost on restart/discard. Pol
 |---|---|---|
 | `checkout(fileId)` | WORKS | reads the local design via the runtime (after the A1 `getFile` guard) |
 | `scene()` | WORKS | id → shape object map |
+| `renderShape(id)` → SVG / `renderShapePng(id,{scale})` → png | WORKS | NATIVE browser-free render of one shape/board/component (Penpot SVG renderer via react-dom server; PNG via system rsvg-convert) — sub-ms, MCP `render_shape` (`47b68ae0d8`·`76570e5743`) |
 | `script(code)` | WORKS | runs JS against `wc`; many edits per call; returns a value |
 | `status()` | WORKS | pending change count + revn (+ `preExistingValidationIssues`) |
 | `validate()` | WORKS | correct schema oracle after A-FIX (was falsely failing) |

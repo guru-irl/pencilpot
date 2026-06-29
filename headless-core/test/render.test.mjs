@@ -25,7 +25,7 @@ test("renderShape returns a self-contained SVG for a board", () => {
   assert.ok(svg.startsWith("<svg"), `starts with <svg: ${svg.slice(0, 40)}`);
   assert.match(svg, /viewBox="0 0 200 120"/, "viewBox matches the board bounds");
   assert.match(svg, /width="200"/, "width attr matches");
-  assert.ok(svg.includes("22aa55") || /<rect/.test(svg), "child rect rendered into the SVG");
+  assert.ok(svg.includes("22aa55") || (svg.match(/<rect/g) || []).length >= 2, "child rect rendered into the SVG");
   assert.ok(svg.length > 200, `non-trivial output (got ${svg.length})`);
 });
 
