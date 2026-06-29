@@ -10,7 +10,10 @@
    injected save-manager script. Active only when the served config.js set
    globalThis.pencilpotFile (same signal app.main.ui.routes uses)."
   (:require
+   [app.common.transit :as t]
+   [app.common.uuid :as uuid]
    [app.main.data.notifications :as ntf]
+   [app.main.data.workspace.notifications :as dwn]
    [app.main.store :as st]
    [app.util.object :as obj]))
 
@@ -92,6 +95,36 @@
              :callback #(st/emit! (ntf/hide :tag :pencilpot-external))}
     :tag :pencilpot-external)))
 
+(defn- on-changes
+  "Apply an AI/MCP/SDK edit LIVE in the open workspace. The runtime broadcasts a
+   `changes` SSE frame (see runtime/live.mjs broadcastChanges) whose `body` is the
+   transit-encoded update-file params the AI committed. We decode it with the SAME
+   transit reader the SPA uses for rp responses and feed Penpot's own collab apply
+   path (handle-file-change -> dch/commit :source :remote), so the user sees the
+   AI's change without a reload. Wrapped in try/catch so a malformed frame can
+   never kill the SSE client."
+  [ev]
+  (try
+    (let [payload    (js/JSON.parse (obj/get ev "data"))
+          revn       (obj/get payload "revn")
+          body       (obj/get payload "body")
+          decoded    (t/decode-str body)
+          file-id    (:id decoded)
+          session-id (:session-id decoded)
+          changes    (:changes decoded)]
+      (when (and (some? file-id) (seq changes))
+        (st/emit!
+         (dwn/handle-file-change
+          {:type :file-change
+           :profile-id (or (get-in @st/state [:profile :id]) uuid/zero)
+           :file-id file-id
+           :session-id (or session-id uuid/zero)
+           :revn (int (or revn (:revn decoded) 0))
+           :vern (int (or (:vern decoded) 0))
+           :changes (vec changes)}))))
+    (catch :default e
+      (js/console.warn "pencilpot: live change apply failed" e))))
+
 (defonce ^:private started? (atom false))
 
 (defn start-client!
@@ -102,6 +135,7 @@
     (reset! started? true)
     (let [es (js/EventSource. "/pencilpot/live")]
       (.addEventListener es "status" on-status)
+      (.addEventListener es "changes" on-changes)
       (.addEventListener es "reload" on-reload))
     (.addEventListener
      js/window "keydown"
