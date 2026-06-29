@@ -23,6 +23,7 @@ Full capability matrix, exact opts, gaps, and worked harnesses:
 ```
 # 1. Boot the runtime (serves the SPA + the RPC API the MCP talks to)
 pencilpot open <project.pencil>          # or: node pencilpot/runtime/server.mjs
+#   add --ai to auto-launch `pi` (this skill preloaded, MCP pointed at the runtime) in the integrated terminal
 #   env: PENCILPOT_PROJECT=<project.pencil or project dir> [+ PENCILPOT_DESIGN=<name>]  OR  PENCILPOT_DESIGN=<abs design dir>;  PENCILPOT_PORT=<port>
 #   waits for: "pencilpot runtime on http://localhost:<port> … fileId=<id>"  (fileId is also in <design>/manifest.edn :id;
 #   the runtime serves the open design for any non-library id, so checkout(fileId) just works)
@@ -58,7 +59,7 @@ POST http://localhost:<port>/pencilpot/discard              # drop staged edits 
 | `wc.addInteraction({shapeId,destination,eventType?,actionType?,preserveScroll?})` | wires a prototype link (default click→navigate) |
 | `wc.addColorToken({set,name,value})` — alias of `wc.addToken({...,type:"color"})` |
 | `wc.serializeStore()` / `wc.validate()` / `wc.pendingChanges()` / `wc.tokens()` | introspection (the MCP `scene()` tool returns the id→shape map) |
-| `wc.renderShape(id)` → SVG / `wc.renderShapePng(id,{scale?,out?})` → png path | NATIVE browser-free render of one shape/board/component (Penpot's SVG renderer via react-dom server; PNG via system `rsvg-convert`). Sub-ms. MCP `render_shape`. |
+| `wc.renderShape(id)` → SVG / `wc.renderShapePng(id,{scale?,out?})` → png path / `wc.renderShapePngHiFi(id,{scale?,out?,fontsDir?})` | SEE a shape/board/component. `renderShape` = browser-free SVG (now carries TEXT as foreignObject). `renderShapePng` = fast rsvg raster but **text-less** (librsvg ignores foreignObject). `renderShapePngHiFi` = Chromium raster that **renders text** (pass `fontsDir`=`<project>/fonts` to embed custom families). MCP `render_shape(shapeId,format,scale,fidelity,fontsDir)` — use `fidelity:"high"` for any board with text. |
 
 **Order matters:** add children → THEN set layout (setters reflow existing children). `closeBoard()` is
 stack-based: close a board before starting an unrelated sibling.
@@ -86,6 +87,20 @@ stack-based: close a board before starting an unrelated sibling.
 > `x`/`y`/`width`/`height`/`rotation`/…) and throws — use `moveShape`/`resizeShape`/`reparentShape`/
 > `reorderShape`/`groupShapes`/`applyToken`/`addInteraction` for those. Everything edits in memory; persist
 > with **`commit()` then `POST /pencilpot/save`** (the save gap) as usual.
+
+## Seeing the design, syncing live, and reading the user's edits
+
+**Render (SEE what you built).** `render_shape` / `wc.renderShape*`:
+- SVG (`format:"svg"`) is browser-free and now text-faithful (text emits foreignObject HTML with inline font styles).
+- PNG fast path (`fidelity:"fast"`, default) uses rsvg — great for shapes/colors, but **blank for text** by design (librsvg can't draw foreignObject).
+- PNG **`fidelity:"high"`** uses the bundled Chromium and renders **text** correctly; pass `fontsDir` = the project's `fonts/` dir so custom families (e.g. Google Sans Flex) are embedded as `@font-face`. Always use high fidelity when the shape contains text.
+
+**Realtime — you work WITH the user.** Your `commit()` (MCP/SDK, JSON path) is broadcast over SSE `/pencilpot/live` and applied **live** in the open editor via Penpot's own collab path — no reload. The user sees your edits as you make them; the header flips to "Unsaved changes". The user's OWN edits are not echoed back to you. (Persisting still needs `POST /pencilpot/save`.)
+
+**Diff — see what the USER changed.** Before the user edits, capture a baseline; afterwards, diff:
+- MCP: `diff_baseline` (capture), then `diff` → `{added,removed,modified[…keys,changes], summary, text}`.
+- CLI: `pencilpot diff <project.pencil> --save-baseline` then `pencilpot diff <project.pencil>` (`--json` for machine-readable).
+- Reports added/removed/modified shapes with the changed SEMANTIC keys (geometry, fills, content, hierarchy, name, visibility); derived/volatile keys are ignored. Use it to catch up on the user's manual edits before continuing.
 
 ## Variable fonts (CLI is the persistence path)
 
@@ -130,9 +145,14 @@ Structural editing, rotation, all-type tokens + literal resolution, component sw
 - **Expecting `commit()` to be blocked by pre-existing imported-file issues.** It isn't — the gate blocks
   only errors YOUR edit introduces (baseline-diff). A pre-existing whole-file nonconformity is allowed through.
 
+- **Rendering text with the fast path.** `renderShapePng`/`fidelity:"fast"` (rsvg) draws shapes but **blank text** — librsvg ignores foreignObject. Use `renderShapePngHiFi`/`fidelity:"high"` (Chromium) with `fontsDir` for any text board.
+
 ## Real-world impact
 
 Verified end-to-end against the canonical DefaultLauncher design: an AI can boot the runtime, checkout,
 build boards/rects/ellipses/text with flex/grid layout + constraints, define components, add color tokens,
 map variable fonts, commit, save to disk, reopen clean, and play the prototype — all on the STABLE SVG
 renderer, no browser injection. Every capability is backed by a deterministic harness in `pencilpot/e2e/ai/`.
+The AI can also **render** any shape/board to faithful SVG or text-accurate PNG (`render.mjs`, `render-text.mjs`),
+see its committed edits appear **live** in the open editor (`realtime.mjs`, browser-verified in `e2e/vf/realtime-browser.mjs`),
+and **diff** the design against a baseline to read the user's manual edits (`diff.mjs`).
